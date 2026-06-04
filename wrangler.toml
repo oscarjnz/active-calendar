@@ -14,7 +14,7 @@ crons = ["0 11 * * *", "0 15 * * *", "0 23 * * *"]
 # así que este archivo es la fuente de verdad para estas dos variables.
 [vars]
 APP_BASE_URL = "https://active-calendar.ojimenez6.workers.dev"
-CLERK_PUBLISHABLE_KEY = "pk_REEMPLAZAME"
+CLERK_PUBLISHABLE_KEY = "pk_test_cmVsYXRlZC1seW54LTI2LmNsZXJrLmFjY291bnRzLmRldiQ"
 
 # Secrets (cargar en el dashboard de Cloudflare o con `wrangler secret put`):
 #   CLERK_SECRET_KEY      sk_...  verifica tokens y consulta usuarios de Clerk
