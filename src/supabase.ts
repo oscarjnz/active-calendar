@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Env, IcalEvent, Profile, TaskRow } from './types';
+import { fetchClerkUser } from './clerk';
 
-/** Cliente con service_role: bypass RLS. Solo para el Worker (cron + sync por usuario). */
+const VALID_ACCENTS = ['neutral', 'indigo', 'emerald', 'rose', 'amber', 'sky'] as const;
+
+/** Cliente con service_role: bypass RLS. Es el único que toca la base de datos. */
 export function adminClient(env: Env): SupabaseClient {
   return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -9,47 +12,66 @@ export function adminClient(env: Env): SupabaseClient {
   });
 }
 
-/** Cliente con anon key + JWT del usuario; respeta RLS. */
-export function userClient(env: Env, jwt: string): SupabaseClient {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        'X-Client-Info': 'active-calendar/user',
-      },
-    },
-  });
-}
-
-/** Verifica el JWT y devuelve el user_id, o null. */
-export async function userIdFromJwt(env: Env, jwt: string): Promise<string | null> {
-  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      apikey: env.SUPABASE_ANON_KEY,
-    },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { id?: string };
-  return data.id ?? null;
-}
-
 export async function getProfile(sb: SupabaseClient, userId: string): Promise<Profile | null> {
-  const { data, error } = await sb
-    .from('profiles')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
+  const { data, error } = await sb.from('profiles').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw new Error(`profiles.select: ${error.message}`);
   return (data as Profile | null) ?? null;
 }
 
-export async function listAllProfilesWithIcal(sb: SupabaseClient): Promise<Profile[]> {
+/** Obtiene el perfil; si no existe lo crea con los datos de Clerk. */
+export async function ensureProfile(
+  sb: SupabaseClient,
+  env: Env,
+  userId: string,
+): Promise<Profile> {
+  const existing = await getProfile(sb, userId);
+  if (existing) return existing;
+
+  const clerk = await fetchClerkUser(env, userId);
+  const displayName =
+    [clerk?.first_name, clerk?.last_name].filter(Boolean).join(' ').trim() ||
+    clerk?.email?.split('@')[0] ||
+    'Estudiante';
+
+  const row = {
+    user_id: userId,
+    display_name: displayName,
+    first_name: clerk?.first_name ?? null,
+    last_name: clerk?.last_name ?? null,
+    email: clerk?.email ?? null,
+    avatar_url: clerk?.image_url ?? null,
+    accent: 'neutral',
+  };
+  const { data, error } = await sb.from('profiles').insert(row).select('*').single();
+  if (error) throw new Error(`profiles.insert: ${error.message}`);
+  return data as Profile;
+}
+
+export async function updateProfile(
+  sb: SupabaseClient,
+  userId: string,
+  fields: { display_name?: string | null; ical_url?: string | null; accent?: string },
+): Promise<Profile> {
+  const patch: Record<string, unknown> = {};
+  if ('display_name' in fields) patch.display_name = fields.display_name?.trim() || null;
+  if ('ical_url' in fields) patch.ical_url = fields.ical_url?.trim() || null;
+  if ('accent' in fields && fields.accent) {
+    patch.accent = (VALID_ACCENTS as readonly string[]).includes(fields.accent)
+      ? fields.accent
+      : 'neutral';
+  }
   const { data, error } = await sb
     .from('profiles')
+    .update(patch)
+    .eq('user_id', userId)
     .select('*')
-    .not('ical_url', 'is', null);
+    .single();
+  if (error) throw new Error(`profiles.update: ${error.message}`);
+  return data as Profile;
+}
+
+export async function listAllProfilesWithIcal(sb: SupabaseClient): Promise<Profile[]> {
+  const { data, error } = await sb.from('profiles').select('*').not('ical_url', 'is', null);
   if (error) throw new Error(`profiles.listAll: ${error.message}`);
   return (data ?? []) as Profile[];
 }
@@ -96,4 +118,18 @@ export async function upsertEvents(
   });
   const { error } = await sb.from('tasks').upsert(rows, { onConflict: 'user_id,uid' });
   if (error) throw new Error(`tasks.upsert: ${error.message}`);
+}
+
+export async function setTaskStatus(
+  sb: SupabaseClient,
+  userId: string,
+  uid: string,
+  status: 'pending' | 'done',
+): Promise<void> {
+  const { error } = await sb
+    .from('tasks')
+    .update({ status })
+    .eq('user_id', userId)
+    .eq('uid', uid);
+  if (error) throw new Error(`tasks.setStatus: ${error.message}`);
 }

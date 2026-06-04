@@ -1,18 +1,28 @@
--- Esquema de Supabase para Active Calendar Tracker (web app multi-tenant).
--- Ejecutar tal cual en el SQL editor del proyecto Supabase.
+-- Esquema de Supabase para Active Calendar (auth con Clerk).
+-- IMPORTANTE: esto recrea las tablas. Como aún no hay datos reales, no pasa nada.
+-- Ejecútalo completo en el SQL Editor de Supabase.
 
--- Perfil por usuario autenticado.
-create table if not exists profiles (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+-- El user_id ahora es el ID de Clerk (texto, ej. "user_2abc..."), no un uuid de auth.users.
+drop table if exists tasks cascade;
+drop table if exists profiles cascade;
+drop table if exists bb_tasks cascade;   -- limpieza de esquemas viejos
+drop table if exists bb_meta cascade;
+
+create table profiles (
+  user_id text primary key,                 -- ID de Clerk
   display_name text,
+  first_name text,
+  last_name text,
+  email text,
+  avatar_url text,
   ical_url text,
+  accent text not null default 'neutral',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
--- Tareas extraidas del feed de cada usuario.
-create table if not exists tasks (
-  user_id uuid not null references auth.users(id) on delete cascade,
+create table tasks (
+  user_id text not null references profiles(user_id) on delete cascade,
   uid text not null,
   summary text not null,
   course text,
@@ -27,35 +37,13 @@ create table if not exists tasks (
 
 create index if not exists idx_tasks_user_due on tasks(user_id, due);
 
--- Row Level Security: cada usuario solo ve y modifica lo suyo desde el cliente.
--- El Worker usa la service_role key (bypass RLS) para sincronizar el iCal.
+-- RLS: solo el Worker (service_role) toca estas tablas. El navegador NUNCA habla
+-- directo con Supabase, así que bloqueamos todo acceso anónimo/autenticado.
+-- service_role siempre hace bypass de RLS, por eso no necesitamos políticas.
 alter table profiles enable row level security;
 alter table tasks enable row level security;
 
-drop policy if exists "own profile select" on profiles;
-drop policy if exists "own profile insert" on profiles;
-drop policy if exists "own profile update" on profiles;
-drop policy if exists "own tasks select" on tasks;
-drop policy if exists "own tasks update" on tasks;
-
-create policy "own profile select" on profiles
-  for select using (auth.uid() = user_id);
-
-create policy "own profile insert" on profiles
-  for insert with check (auth.uid() = user_id);
-
-create policy "own profile update" on profiles
-  for update using (auth.uid() = user_id);
-
-create policy "own tasks select" on tasks
-  for select using (auth.uid() = user_id);
-
--- El usuario solo puede cambiar el campo status; el resto lo mantiene el Worker.
--- A nivel de RLS permitimos update; en el cliente solo actualizaremos status.
-create policy "own tasks update" on tasks
-  for update using (auth.uid() = user_id);
-
--- Trigger para mantener updated_at en profiles.
+-- Trigger para updated_at en profiles.
 create or replace function touch_profiles_updated_at()
 returns trigger as $$
 begin

@@ -1,4 +1,7 @@
+# Secrets para desarrollo local (copia a .dev.vars y rellena).
+CLERK_SECRET_KEY=
 SUPABASE_URL=
-SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_KEY=
+# Estas dos van en wrangler.toml [vars], pero puedes sobrescribirlas localmente:
 APP_BASE_URL=http://localhost:8787
+CLERK_PUBLISHABLE_KEY=

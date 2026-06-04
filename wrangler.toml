@@ -4,20 +4,22 @@ compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # Cron triggers en UTC equivalentes a 07:00, 11:00 y 19:00 hora Santo Domingo (UTC-4).
-# El cron itera todos los usuarios con ical_url configurado y refresca sus tareas.
+# Itera todos los usuarios con ical_url y refresca sus tareas de la semana.
 [triggers]
 crons = ["0 11 * * *", "0 15 * * *", "0 23 * * *"]
 
-# Variable publica (no secreta): URL del propio Worker. Se inyecta al HTML para que
-# Supabase Auth sepa a donde redirigir despues del magic link.
-# Sobrescribela en `wrangler.toml` o via dashboard para tu dominio real.
+# Variables NO secretas (se versionan aquí). APP_BASE_URL = URL real del Worker.
+# CLERK_PUBLISHABLE_KEY (pk_...) es PÚBLICA: pégala aquí (acaba incrustada en el HTML
+# de todas formas). OJO: lo que pongas en [vars] sobrescribe el dashboard en cada deploy,
+# así que este archivo es la fuente de verdad para estas dos variables.
 [vars]
-APP_BASE_URL = "https://active-calendar.workers.dev"
+APP_BASE_URL = "https://active-calendar.ojimenez6.workers.dev"
+CLERK_PUBLISHABLE_KEY = "pk_REEMPLAZAME"
 
-# Secrets esperados (cargar en el dashboard de Cloudflare o con `wrangler secret put`):
+# Secrets (cargar en el dashboard de Cloudflare o con `wrangler secret put`):
+#   CLERK_SECRET_KEY      sk_...  verifica tokens y consulta usuarios de Clerk
 #   SUPABASE_URL          URL del proyecto Supabase
-#   SUPABASE_ANON_KEY     anon/public key (la usa el frontend; va incrustada en el HTML)
-#   SUPABASE_SERVICE_KEY  service role key (solo server-side; bypass RLS para cron y sync)
+#   SUPABASE_SERVICE_KEY  service role key (bypass RLS; solo server-side)
 
 [observability]
 enabled = true

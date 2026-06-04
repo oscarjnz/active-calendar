@@ -1,305 +1,428 @@
 import type { Env } from './types';
 
-/** SPA mínima servida por el Worker. Usa Supabase JS + Tailwind por CDN. */
+/** SPA servida por el Worker. Login con Clerk; datos vía el API del Worker. */
 export function renderApp(env: Env): string {
-  // Inyectamos URL y anon key como constantes globales seguras para el cliente.
-  // Usamos null (no undefined) para que JSON.stringify no omita las claves; asi
-  // el frontend puede detectar config faltante y mostrar un mensaje claro.
   const cfg = JSON.stringify({
-    SUPABASE_URL: env.SUPABASE_URL ?? null,
-    SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY ?? null,
+    CLERK_PUBLISHABLE_KEY: env.CLERK_PUBLISHABLE_KEY ?? null,
     APP_BASE_URL: env.APP_BASE_URL ?? null,
   });
 
   return `<!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="h-full">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0a0a0a" />
 <title>Active Calendar</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
+  :root { color-scheme: light; }
   body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .fade-in { animation: fade .15s ease-out; }
-  @keyframes fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  .fade-in { animation: fade .18s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .spin { animation: sp 1s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 9999px; }
 </style>
 </head>
-<body class="min-h-screen bg-neutral-50 text-neutral-900">
-<div id="app" class="max-w-3xl mx-auto px-4 py-8"></div>
+<body class="h-full bg-neutral-50 text-neutral-900">
+<div id="root" class="min-h-full"></div>
 
 <script>window.__CFG__ = ${cfg};</script>
 <script type="module">
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { Clerk } from 'https://esm.sh/@clerk/clerk-js@5';
 
 const cfg = window.__CFG__;
-const app = document.getElementById('app');
+const root = document.getElementById('root');
 
-// Si faltan las variables de entorno del Worker, mostramos un aviso claro
-// en vez de una pantalla en blanco.
-if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
-  app.innerHTML = '<div class="fade-in bg-amber-50 border border-amber-300 rounded-xl p-5">' +
+if (!cfg.CLERK_PUBLISHABLE_KEY) {
+  root.innerHTML = '<div class="max-w-lg mx-auto mt-20 bg-amber-50 border border-amber-300 rounded-xl p-6">' +
     '<h1 class="text-xl font-semibold mb-2">Falta configuración</h1>' +
-    '<p class="text-neutral-700 text-sm mb-2">El Worker está corriendo pero no tiene cargadas las variables de Supabase.</p>' +
-    '<p class="text-neutral-700 text-sm">Añade en Cloudflare (Workers → tu Worker → Settings → Variables and Secrets) las claves ' +
-    '<code class="bg-neutral-200 px-1 rounded">SUPABASE_URL</code>, ' +
-    '<code class="bg-neutral-200 px-1 rounded">SUPABASE_ANON_KEY</code> y ' +
-    '<code class="bg-neutral-200 px-1 rounded">SUPABASE_SERVICE_KEY</code>, luego vuelve a desplegar.</p></div>';
-  throw new Error('Config faltante: SUPABASE_URL / SUPABASE_ANON_KEY');
+    '<p class="text-sm text-neutral-700">El Worker no tiene <code class="bg-neutral-200 px-1 rounded">CLERK_PUBLISHABLE_KEY</code>. ' +
+    'Cárgala en Cloudflare (Settings → Variables) y vuelve a desplegar.</p></div>';
+  throw new Error('Falta CLERK_PUBLISHABLE_KEY');
 }
 
-const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-});
+// ---------- utilidades ----------
+const ACCENTS = {
+  neutral: { solid: 'bg-neutral-900 hover:bg-neutral-800', text: 'text-neutral-900', soft: 'bg-neutral-100', ring: 'focus:ring-neutral-900', bar: 'bg-neutral-900', dot: 'bg-neutral-900' },
+  indigo:  { solid: 'bg-indigo-600 hover:bg-indigo-700', text: 'text-indigo-700', soft: 'bg-indigo-50', ring: 'focus:ring-indigo-600', bar: 'bg-indigo-600', dot: 'bg-indigo-600' },
+  emerald: { solid: 'bg-emerald-600 hover:bg-emerald-700', text: 'text-emerald-700', soft: 'bg-emerald-50', ring: 'focus:ring-emerald-600', bar: 'bg-emerald-600', dot: 'bg-emerald-600' },
+  rose:    { solid: 'bg-rose-600 hover:bg-rose-700', text: 'text-rose-700', soft: 'bg-rose-50', ring: 'focus:ring-rose-600', bar: 'bg-rose-600', dot: 'bg-rose-600' },
+  amber:   { solid: 'bg-amber-500 hover:bg-amber-600', text: 'text-amber-700', soft: 'bg-amber-50', ring: 'focus:ring-amber-500', bar: 'bg-amber-500', dot: 'bg-amber-500' },
+  sky:     { solid: 'bg-sky-600 hover:bg-sky-700', text: 'text-sky-700', soft: 'bg-sky-50', ring: 'focus:ring-sky-600', bar: 'bg-sky-600', dot: 'bg-sky-600' },
+};
+function ac() { return ACCENTS[state.profile?.accent] || ACCENTS.neutral; }
 
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
 function el(html) {
   const t = document.createElement('template');
   t.innerHTML = html.trim();
   return t.content.firstElementChild;
 }
-
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-}
-
 function fmtDue(iso) {
   if (!iso) return 'Sin fecha';
-  const d = new Date(iso);
-  // Forzamos zona Santo Domingo (UTC-4 fijo).
-  const shifted = new Date(d.getTime() - 4 * 3600 * 1000);
+  const d = new Date(new Date(iso).getTime() - 4 * 3600 * 1000); // a SDQ
   const days = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  const dd = String(shifted.getUTCDate()).padStart(2,'0');
-  const mm = months[shifted.getUTCMonth()];
-  const hh = String(shifted.getUTCHours()).padStart(2,'0');
-  const mi = String(shifted.getUTCMinutes()).padStart(2,'0');
-  return days[shifted.getUTCDay()] + ' ' + dd + '/' + mm + ' ' + hh + ':' + mi;
+  return days[d.getUTCDay()] + ' ' + String(d.getUTCDate()).padStart(2,'0') + '/' + months[d.getUTCMonth()] +
+         ' · ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
 }
-
-function weekRangeSdq() {
-  const now = new Date();
-  const shifted = new Date(now.getTime() - 4 * 3600 * 1000);
-  const dow = shifted.getUTCDay() === 0 ? 7 : shifted.getUTCDay();
-  const monday = new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - (dow - 1)));
-  const start = new Date(monday.getTime() + 4 * 3600 * 1000); // UTC ms para SDQ 00:00
-  const end = new Date(start.getTime() + 7 * 86400000 - 1);
-  return { start, end };
-}
-
-async function renderLogin() {
-  app.innerHTML = '';
-  app.appendChild(el(\`
-    <div class="fade-in">
-      <h1 class="text-3xl font-semibold mb-2">Active Calendar</h1>
-      <p class="text-neutral-600 mb-6">Tus tareas de Blackboard, todas en una sola vista. Te enviamos un enlace mágico para iniciar sesión, sin contraseñas.</p>
-      <form id="login" class="bg-white border border-neutral-200 rounded-xl p-5 space-y-3 shadow-sm">
-        <label class="block text-sm font-medium">Email</label>
-        <input id="email" type="email" required class="w-full border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900" placeholder="tu@correo.com" />
-        <button class="w-full bg-neutral-900 text-white rounded-lg py-2 font-medium hover:bg-neutral-800">Enviarme el enlace</button>
-        <p id="login-msg" class="text-sm text-neutral-500"></p>
-      </form>
-    </div>
-  \`));
-  document.getElementById('login').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('email').value.trim();
-    const msg = document.getElementById('login-msg');
-    msg.textContent = 'Enviando…';
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: cfg.APP_BASE_URL }
-    });
-    msg.textContent = error ? ('Error: ' + error.message) : 'Listo. Revisa tu email y haz clic en el enlace.';
-  });
-}
-
-async function loadProfile(userId) {
-  const { data } = await sb.from('profiles').select('*').eq('user_id', userId).maybeSingle();
-  return data;
-}
-
-async function ensureProfile(user) {
-  let p = await loadProfile(user.id);
-  if (!p) {
-    const defaultName = (user.email || '').split('@')[0];
-    const { data, error } = await sb.from('profiles').insert({ user_id: user.id, display_name: defaultName }).select('*').single();
-    if (error) throw error;
-    p = data;
-  }
-  return p;
-}
-
-async function loadWeekTasks(userId) {
-  const { start, end } = weekRangeSdq();
-  const { data, error } = await sb.from('tasks')
-    .select('*').eq('user_id', userId)
-    .gte('due', start.toISOString()).lte('due', end.toISOString())
-    .order('due', { ascending: true });
-  if (error) throw error;
-  return data || [];
-}
-
-async function triggerSync(session) {
-  const res = await fetch('/api/sync', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + session.access_token }
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(t || ('HTTP ' + res.status));
-  }
-  return await res.json();
-}
-
-async function setTaskStatus(userId, uid, status) {
-  const { error } = await sb.from('tasks').update({ status }).eq('user_id', userId).eq('uid', uid);
-  if (error) throw error;
-}
-
-async function saveProfile(userId, fields) {
-  const { error } = await sb.from('profiles').update(fields).eq('user_id', userId);
-  if (error) throw error;
-}
-
-function rangeText() {
-  const { start, end } = weekRangeSdq();
+function rangeText(r) {
+  if (!r) return '';
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  const s = new Date(start.getTime() - 4*3600*1000);
-  const e = new Date(end.getTime() - 4*3600*1000);
-  return String(s.getUTCDate()).padStart(2,'0') + '/' + months[s.getUTCMonth()] +
-         ' – ' + String(e.getUTCDate()).padStart(2,'0') + '/' + months[e.getUTCMonth()] +
-         ' ' + e.getUTCFullYear();
+  const s = new Date(new Date(r.start).getTime() - 4*3600*1000);
+  const e = new Date(new Date(r.end).getTime() - 4*3600*1000);
+  return String(s.getUTCDate()).padStart(2,'0')+'/'+months[s.getUTCMonth()]+' – '+String(e.getUTCDate()).padStart(2,'0')+'/'+months[e.getUTCMonth()]+' '+e.getUTCFullYear();
 }
 
-async function renderDashboard(session) {
-  const user = session.user;
-  let profile = await ensureProfile(user);
-  const tasks = await loadWeekTasks(user.id);
+// ---------- estado + API ----------
+const clerk = new Clerk(cfg.CLERK_PUBLISHABLE_KEY);
+const state = { profile: null, tasks: [], range: null, tab: 'resumen', filter: 'all' };
 
-  app.innerHTML = '';
-  app.appendChild(el(\`
-    <div class="fade-in space-y-6">
-      <header class="flex items-start justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-semibold">Hola, \${esc(profile.display_name || user.email)}</h1>
-          <p class="text-neutral-600 text-sm">Semana \${esc(rangeText())}</p>
+async function api(path, opts = {}) {
+  const token = await clerk.session.getToken();
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + token, ...(opts.headers || {}) },
+  });
+  if (!res.ok) throw new Error((await res.text().catch(()=>'')) || ('HTTP ' + res.status));
+  return res.json();
+}
+
+// ---------- render: login ----------
+function renderLanding() {
+  root.innerHTML = '';
+  const wrap = el(\`
+    <div class="fade-in min-h-screen grid md:grid-cols-2">
+      <div class="hidden md:flex flex-col justify-center px-12 bg-neutral-900 text-white">
+        <h1 class="text-4xl font-semibold tracking-tight">Active Calendar</h1>
+        <p class="mt-4 text-neutral-300 max-w-sm">Todas tus tareas de Blackboard de la semana, organizadas por materia, en una sola vista. Sin instalar nada.</p>
+        <ul class="mt-8 space-y-2 text-sm text-neutral-400">
+          <li>· Resumen de progreso de la semana</li>
+          <li>· Tareas agrupadas por materia</li>
+          <li>· Marca lo que vas completando</li>
+          <li>· Se sincroniza solo varias veces al día</li>
+        </ul>
+      </div>
+      <div class="flex items-center justify-center p-6">
+        <div class="w-full max-w-sm">
+          <h2 class="text-2xl font-semibold mb-1 md:hidden">Active Calendar</h2>
+          <p class="text-neutral-600 mb-6 md:hidden">Tus tareas de Blackboard en un solo lugar.</p>
+          <div id="signin"></div>
         </div>
-        <div class="flex gap-2">
-          <button id="sync" class="px-3 py-2 text-sm bg-neutral-900 text-white rounded-lg hover:bg-neutral-800">Sincronizar</button>
-          <button id="logout" class="px-3 py-2 text-sm border border-neutral-300 rounded-lg hover:bg-neutral-100">Salir</button>
-        </div>
-      </header>
-
-      <section class="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm">
-        <h2 class="font-medium mb-3">Configuración</h2>
-        <label class="block text-sm font-medium">Tu nombre</label>
-        <input id="display_name" class="w-full border border-neutral-300 rounded-lg px-3 py-2 mb-3" value="\${esc(profile.display_name || '')}" />
-        <label class="block text-sm font-medium">URL iCal de Blackboard</label>
-        <input id="ical_url" class="w-full border border-neutral-300 rounded-lg px-3 py-2 mb-3 font-mono text-xs" placeholder="https://…/learn.ics" value="\${esc(profile.ical_url || '')}" />
-        <details class="text-sm text-neutral-600 mb-3">
-          <summary class="cursor-pointer">¿Cómo obtener mi URL iCal?</summary>
-          <ol class="list-decimal ml-5 mt-2 space-y-1">
-            <li>Entra al portal de Blackboard.</li>
-            <li>Abre <b>Calendario</b>.</li>
-            <li>Busca el botón <b>"Get External Calendar Link"</b> / <b>"Obtener enlace externo"</b> (engranaje o ⋯).</li>
-            <li>Genera (o regenera) el enlace y cópialo.</li>
-            <li>Pégalo arriba y guarda.</li>
-          </ol>
-          <p class="mt-2">El enlace es personal y contiene un token. No lo compartas con nadie. Active Calendar lo guarda cifrado en reposo (Supabase) y solo lo usa para leer tu calendario.</p>
-        </details>
-        <button id="save" class="px-3 py-2 text-sm bg-neutral-900 text-white rounded-lg hover:bg-neutral-800">Guardar</button>
-        <span id="save-msg" class="ml-3 text-sm text-neutral-500"></span>
-      </section>
-
-      <section>
-        <h2 class="font-medium mb-3">Tareas de la semana</h2>
-        <div id="tasks" class="space-y-2"></div>
-      </section>
+      </div>
     </div>
-  \`));
+  \`);
+  root.appendChild(wrap);
+  clerk.mountSignIn(document.getElementById('signin'), { afterSignInUrl: cfg.APP_BASE_URL, afterSignUpUrl: cfg.APP_BASE_URL });
+}
 
-  const list = document.getElementById('tasks');
-  if (!profile.ical_url) {
-    list.appendChild(el(\`<p class="text-sm text-neutral-500 bg-amber-50 border border-amber-200 rounded-lg p-3">Aún no has configurado tu URL iCal. Hazlo arriba y pulsa <b>Sincronizar</b>.</p>\`));
-  } else if (tasks.length === 0) {
-    list.appendChild(el(\`<p class="text-sm text-neutral-500 bg-white border border-neutral-200 rounded-lg p-3">No hay tareas registradas esta semana. Si crees que falta algo, pulsa <b>Sincronizar</b>.</p>\`));
-  } else {
-    for (const t of tasks) {
-      const done = t.status === 'done';
-      const row = el(\`
-        <label class="flex items-start gap-3 bg-white border border-neutral-200 rounded-lg p-3 cursor-pointer hover:border-neutral-300">
-          <input type="checkbox" class="mt-1 h-4 w-4" \${done ? 'checked' : ''} />
-          <div class="flex-1">
-            <div class="text-sm \${done ? 'line-through text-neutral-400' : ''}">
-              \${t.course ? '<span class="font-mono text-xs bg-neutral-100 px-1.5 py-0.5 rounded mr-1">' + esc(t.course) + '</span>' : ''}
-              <span class="\${done ? '' : 'font-medium'}">\${esc(t.summary)}</span>
-            </div>
-            <div class="text-xs text-neutral-500 mt-0.5">\${esc(fmtDue(t.due))}\${t.url ? ' · <a class="underline" target="_blank" rel="noopener" href="' + esc(t.url) + '">abrir</a>' : ''}</div>
-          </div>
-        </label>
-      \`);
-      const cb = row.querySelector('input');
-      cb.addEventListener('change', async () => {
-        const newStatus = cb.checked ? 'done' : 'pending';
-        try {
-          await setTaskStatus(user.id, t.uid, newStatus);
-          await renderDashboard(session);
-        } catch (err) {
-          alert('No se pudo actualizar: ' + err.message);
-        }
-      });
-      list.appendChild(row);
-    }
-  }
+// ---------- render: onboarding (sin enlace) ----------
+function renderOnboarding() {
+  root.innerHTML = '';
+  const a = ac();
+  const wrap = el(\`
+    <div class="fade-in max-w-xl mx-auto px-4 py-10">
+      <div id="topbar" class="flex justify-end mb-6"></div>
+      <h1 class="text-2xl font-semibold mb-1">Hola, \${esc(state.profile.display_name || '')}</h1>
+      <p class="text-neutral-600 mb-6">Solo falta un paso: conecta tu calendario de Blackboard.</p>
+      <div class="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm space-y-3">
+        <label class="block text-sm font-medium">URL iCal de Blackboard</label>
+        <input id="ical" class="w-full border border-neutral-300 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" placeholder="https://…/learn.ics" />
+        <details class="text-sm text-neutral-600">
+          <summary class="cursor-pointer select-none">¿Cómo obtengo mi enlace? (paso a paso)</summary>
+          <ol class="list-decimal ml-5 mt-2 space-y-1">
+            <li>Entra al portal de Blackboard de tu universidad.</li>
+            <li>Abre el <b>Calendario</b>.</li>
+            <li>Busca <b>"Get External Calendar Link"</b> / <b>"Obtener enlace externo"</b> (icono de engranaje o ⋯).</li>
+            <li>Genera (o regenera) el enlace y cópialo. Debe terminar en <code>.ics</code>.</li>
+            <li>Pégalo aquí arriba.</li>
+          </ol>
+          <p class="mt-2 text-neutral-500">El enlace es personal. No lo compartas con nadie.</p>
+        </details>
+        <button id="save" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Guardar y sincronizar</button>
+        <span id="msg" class="ml-2 text-sm text-neutral-500"></span>
+      </div>
+    </div>
+  \`);
+  root.appendChild(wrap);
+  mountUserButton(document.getElementById('topbar'));
 
   document.getElementById('save').addEventListener('click', async () => {
-    const msg = document.getElementById('save-msg');
+    const msg = document.getElementById('msg');
+    const url = document.getElementById('ical').value.trim();
+    if (!url) { msg.textContent = 'Pega tu enlace primero.'; return; }
     msg.textContent = 'Guardando…';
     try {
-      await saveProfile(user.id, {
-        display_name: document.getElementById('display_name').value.trim() || null,
-        ical_url: document.getElementById('ical_url').value.trim() || null,
-      });
-      msg.textContent = 'Guardado.';
-      setTimeout(() => renderDashboard(session), 400);
-    } catch (err) {
-      msg.textContent = 'Error: ' + err.message;
-    }
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ ical_url: url }) });
+      state.profile = r.profile;
+      msg.textContent = 'Sincronizando…';
+      const s = await api('/api/sync', { method: 'POST' });
+      state.tasks = s.tasks || [];
+      renderApp2();
+    } catch (e) { msg.textContent = 'Error: ' + e.message; }
   });
+}
 
-  document.getElementById('sync').addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    btn.textContent = 'Sincronizando…';
+function mountUserButton(node) {
+  clerk.mountUserButton(node, { afterSignOutUrl: cfg.APP_BASE_URL });
+}
+
+// ---------- render: app principal ----------
+function stats() {
+  const total = state.tasks.length;
+  const done = state.tasks.filter(t => t.status === 'done').length;
+  return { total, done, pending: total - done, pct: total ? Math.round(done / total * 100) : 0 };
+}
+function byCourse() {
+  const map = new Map();
+  for (const t of state.tasks) {
+    const k = t.course || 'Sin materia';
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(t);
+  }
+  return [...map.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+}
+
+function taskRow(t) {
+  const a = ac();
+  const done = t.status === 'done';
+  const row = el(\`
+    <label class="flex items-start gap-3 bg-white border border-neutral-200 rounded-lg p-3 cursor-pointer hover:border-neutral-300 transition">
+      <input type="checkbox" class="mt-0.5 h-4 w-4 accent-neutral-900" \${done ? 'checked' : ''} />
+      <div class="flex-1 min-w-0">
+        <div class="text-sm \${done ? 'line-through text-neutral-400' : 'font-medium'}">\${esc(t.summary)}</div>
+        <div class="text-xs text-neutral-500 mt-0.5 flex flex-wrap gap-x-2">
+          <span>\${esc(fmtDue(t.due))}</span>
+          \${t.course ? '<span class="'+a.text+'">'+esc(t.course)+'</span>' : ''}
+          \${t.url ? '<a class="underline" target="_blank" rel="noopener" href="'+esc(t.url)+'">abrir en Blackboard</a>' : ''}
+        </div>
+      </div>
+    </label>
+  \`);
+  row.querySelector('input').addEventListener('change', async (e) => {
+    const ns = e.target.checked ? 'done' : 'pending';
+    e.target.disabled = true;
     try {
-      const r = await triggerSync(session);
-      btn.textContent = 'Listo (' + (r.weekCount ?? 0) + ')';
-      await renderDashboard(session);
+      await api('/api/task', { method: 'POST', body: JSON.stringify({ uid: t.uid, status: ns }) });
+      const local = state.tasks.find(x => x.uid === t.uid);
+      if (local) local.status = ns;
+      renderTab();
     } catch (err) {
-      alert('Error al sincronizar: ' + err.message);
-      btn.disabled = false;
-      btn.textContent = 'Sincronizar';
+      alert('No se pudo actualizar: ' + err.message);
+      e.target.checked = !e.target.checked;
+      e.target.disabled = false;
     }
   });
+  return row;
+}
 
-  document.getElementById('logout').addEventListener('click', async () => {
-    await sb.auth.signOut();
-    location.href = '/';
+function renderResumen(node) {
+  const a = ac();
+  const s = stats();
+  const upcoming = state.tasks.filter(t => t.status === 'pending').slice(0, 5);
+  node.appendChild(el(\`
+    <div class="grid grid-cols-3 gap-3">
+      <div class="bg-white border border-neutral-200 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.pending}</div><div class="text-xs text-neutral-500">Pendientes</div></div>
+      <div class="bg-white border border-neutral-200 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.done}</div><div class="text-xs text-neutral-500">Hechas</div></div>
+      <div class="bg-white border border-neutral-200 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500">Total</div></div>
+    </div>
+  \`));
+  node.appendChild(el(\`
+    <div class="bg-white border border-neutral-200 rounded-xl p-4 mt-3">
+      <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%</span></div>
+      <div class="h-2 bg-neutral-100 rounded-full overflow-hidden"><div class="\${a.bar} h-full" style="width:\${s.pct}%"></div></div>
+    </div>
+  \`));
+  const up = el('<div class="mt-4"><h3 class="text-sm font-medium mb-2">Próximas pendientes</h3><div class="space-y-2"></div></div>');
+  const list = up.querySelector('div.space-y-2');
+  if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500">Nada pendiente. ¡Bien ahí!</p>'));
+  else upcoming.forEach(t => list.appendChild(taskRow(t)));
+  node.appendChild(up);
+}
+
+function renderMaterias(node) {
+  const a = ac();
+  const groups = byCourse();
+  if (groups.length === 0) { node.appendChild(el('<p class="text-sm text-neutral-500">No hay tareas esta semana.</p>')); return; }
+  for (const [course, tasks] of groups) {
+    const done = tasks.filter(t => t.status === 'done').length;
+    const pct = Math.round(done / tasks.length * 100);
+    const card = el(\`
+      <div class="bg-white border border-neutral-200 rounded-xl p-4 mb-3">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="font-semibold flex items-center gap-2"><span class="inline-block h-2.5 w-2.5 rounded-full \${a.dot}"></span>\${esc(course)}</h3>
+          <span class="text-xs text-neutral-500">\${done}/\${tasks.length}</span>
+        </div>
+        <div class="h-1.5 bg-neutral-100 rounded-full overflow-hidden mb-3"><div class="\${a.bar} h-full" style="width:\${pct}%"></div></div>
+        <div class="space-y-2"></div>
+      </div>
+    \`);
+    const list = card.querySelector('div.space-y-2');
+    tasks.forEach(t => list.appendChild(taskRow(t)));
+    node.appendChild(card);
+  }
+}
+
+function renderTodas(node) {
+  const a = ac();
+  const chips = el(\`<div class="flex gap-2 mb-3">
+    \${['all','pending','done'].map(f => '<button data-f="'+f+'" class="chip px-3 py-1.5 rounded-full text-sm border '+(state.filter===f?(a.solid+' text-white border-transparent'):'border-neutral-300 text-neutral-700 bg-white')+'">'+({all:'Todas',pending:'Pendientes',done:'Hechas'}[f])+'</button>').join('')}
+  </div>\`);
+  chips.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { state.filter = b.dataset.f; renderTab(); }));
+  node.appendChild(chips);
+
+  let list = state.tasks.slice();
+  if (state.filter === 'pending') list = list.filter(t => t.status === 'pending');
+  if (state.filter === 'done') list = list.filter(t => t.status === 'done');
+  const box = el('<div class="space-y-2"></div>');
+  if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500">Nada por aquí.</p>'));
+  else list.forEach(t => box.appendChild(taskRow(t)));
+  node.appendChild(box);
+}
+
+function renderAjustes(node) {
+  const a = ac();
+  const p = state.profile;
+  const card = el(\`
+    <div class="space-y-4">
+      <div class="bg-white border border-neutral-200 rounded-xl p-5 space-y-3">
+        <h3 class="font-medium">Perfil</h3>
+        <label class="block text-sm">Nombre para mostrar</label>
+        <input id="dn" class="w-full border border-neutral-300 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.display_name||'')}" />
+        <p class="text-xs text-neutral-500">Correo: \${esc(p.email||'—')}</p>
+      </div>
+      <div class="bg-white border border-neutral-200 rounded-xl p-5 space-y-3">
+        <h3 class="font-medium">Calendario de Blackboard</h3>
+        <label class="block text-sm">URL iCal</label>
+        <input id="ical" class="w-full border border-neutral-300 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
+      </div>
+      <div class="bg-white border border-neutral-200 rounded-xl p-5">
+        <h3 class="font-medium mb-3">Color de acento</h3>
+        <div id="accents" class="flex gap-3"></div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="save" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Guardar cambios</button>
+        <button id="resync" class="border border-neutral-300 rounded-lg px-4 py-2">Sincronizar ahora</button>
+        <span id="msg" class="text-sm text-neutral-500"></span>
+      </div>
+    </div>
+  \`);
+  node.appendChild(card);
+
+  const accents = card.querySelector('#accents');
+  Object.keys(ACCENTS).forEach(name => {
+    const sel = p.accent === name;
+    const sw = el('<button data-a="'+name+'" class="h-8 w-8 rounded-full '+ACCENTS[name].bar+' ring-offset-2 '+(sel?'ring-2 ring-neutral-900':'')+'" title="'+name+'"></button>');
+    sw.addEventListener('click', () => { state.profile.accent = name; renderTab(); });
+    accents.appendChild(sw);
+  });
+
+  card.querySelector('#save').addEventListener('click', async () => {
+    const msg = card.querySelector('#msg');
+    msg.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({
+        display_name: card.querySelector('#dn').value.trim(),
+        ical_url: card.querySelector('#ical').value.trim(),
+        accent: state.profile.accent,
+      })});
+      state.profile = r.profile;
+      msg.textContent = 'Guardado.';
+      renderShell();
+    } catch (e) { msg.textContent = 'Error: ' + e.message; }
+  });
+
+  card.querySelector('#resync').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
+    try { const s = await api('/api/sync', { method: 'POST' }); state.tasks = s.tasks || []; renderShell(); }
+    catch (err) { alert('Error: ' + err.message); btn.disabled = false; btn.textContent = old; }
   });
 }
 
-async function boot() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) await renderDashboard(session);
-  else await renderLogin();
+const TABS = [
+  ['resumen','Resumen'], ['materias','Materias'], ['todas','Todas'], ['ajustes','Ajustes']
+];
 
-  sb.auth.onAuthStateChange((_event, s) => {
-    if (s) renderDashboard(s);
-    else renderLogin();
+function renderTab() {
+  const node = document.getElementById('tabContent');
+  if (!node) return;
+  node.innerHTML = '';
+  node.classList.add('fade-in');
+  if (state.tab === 'resumen') renderResumen(node);
+  else if (state.tab === 'materias') renderMaterias(node);
+  else if (state.tab === 'todas') renderTodas(node);
+  else if (state.tab === 'ajustes') renderAjustes(node);
+  // refrescar estilos de pestañas activas
+  document.querySelectorAll('[data-tab]').forEach(b => {
+    const on = b.dataset.tab === state.tab;
+    b.className = 'tabbtn px-3 py-2 text-sm rounded-lg ' + (on ? (ac().soft + ' ' + ac().text + ' font-medium') : 'text-neutral-600 hover:bg-neutral-100');
   });
 }
 
-boot().catch(err => {
-  app.innerHTML = '<pre class="text-red-600 text-sm whitespace-pre-wrap">' + (err && err.message || err) + '</pre>';
+function renderShell() {
+  root.innerHTML = '';
+  const a = ac();
+  const shell = el(\`
+    <div class="max-w-3xl mx-auto px-4 py-6">
+      <header class="flex items-center justify-between gap-3 mb-5">
+        <div>
+          <h1 class="text-xl font-semibold leading-tight">Hola, \${esc(state.profile.display_name||'')}</h1>
+          <p class="text-xs text-neutral-500">Semana \${esc(rangeText(state.range))}</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="syncBtn" class="\${a.solid} text-white text-sm rounded-lg px-3 py-2">Sincronizar</button>
+          <div id="userbtn"></div>
+        </div>
+      </header>
+      <nav class="flex gap-1 mb-4 bg-white border border-neutral-200 rounded-xl p-1 w-full overflow-x-auto">
+        \${TABS.map(([k,l]) => '<button data-tab="'+k+'" class="tabbtn px-3 py-2 text-sm rounded-lg whitespace-nowrap">'+l+'</button>').join('')}
+      </nav>
+      <main id="tabContent"></main>
+    </div>
+  \`);
+  root.appendChild(shell);
+  mountUserButton(document.getElementById('userbtn'));
+  shell.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { state.tab = b.dataset.tab; renderTab(); }));
+  shell.querySelector('#syncBtn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
+    try { const s = await api('/api/sync', { method: 'POST' }); state.tasks = s.tasks || []; renderTab(); btn.textContent = old; btn.disabled = false; }
+    catch (err) { alert('Error: ' + err.message); btn.textContent = old; btn.disabled = false; }
+  });
+  renderTab();
+}
+
+// Decide entre onboarding y app según haya enlace.
+function renderApp2() {
+  if (!state.profile.ical_url) renderOnboarding();
+  else renderShell();
+}
+
+async function loadAndRender() {
+  root.innerHTML = '<div class="flex items-center justify-center h-screen text-neutral-400"><div class="spin h-6 w-6 border-2 border-neutral-300 border-t-neutral-900 rounded-full"></div></div>';
+  try {
+    const me = await api('/api/me');
+    state.profile = me.profile;
+    state.tasks = me.tasks || [];
+    state.range = me.range;
+    renderApp2();
+  } catch (e) {
+    root.innerHTML = '<pre class="text-red-600 text-sm p-6 whitespace-pre-wrap">'+esc(e.message)+'</pre>';
+  }
+}
+
+// ---------- arranque ----------
+await clerk.load();
+if (clerk.user) await loadAndRender();
+else renderLanding();
+
+clerk.addListener(({ user }) => {
+  if (user && !state.profile) loadAndRender();
+  else if (!user) renderLanding();
 });
 </script>
 </body>

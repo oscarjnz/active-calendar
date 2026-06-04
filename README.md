@@ -1,174 +1,177 @@
 # Active Calendar
 
-**Web app** que reúne las tareas de Blackboard de la semana en una sola vista, sin instalar nada. Inicias sesión con tu email (enlace mágico, sin contraseñas), pegas tu URL iCal de Blackboard una vez, y listo: ves todas tus tareas de la semana y las marcas como hechas con un check. Diseñada para que tú y tus amigos la usen desde cualquier navegador, escritorio o móvil.
+**Web app** que reúne tus tareas de Blackboard de la semana en una sola vista, organizadas por materia, con secciones, progreso y personalización. Sin instalar nada: tú y tus amigos entran a una URL, inician sesión con **Clerk** (Google, email, etc.), pegan su enlace iCal de Blackboard una vez, y listo.
 
-- **Frontend + backend + cron**: un solo Cloudflare Worker.
-- **Auth + base de datos**: Supabase (magic link + Postgres con RLS).
-- **Deploy 100% web** vía GitHub Actions — solo haces `git push` y se actualiza.
-- **Privacidad**: solo se guarda email (lo gestiona Supabase Auth), nombre que el usuario ingrese, y la URL iCal personal. Nada más.
+- **Frontend + API + cron**: un solo Cloudflare Worker.
+- **Login**: Clerk (componentes prefabricados, sin límite de emails).
+- **Base de datos**: Supabase (Postgres). El navegador **nunca** habla con Supabase: solo el Worker, que verifica el token de Clerk en cada llamada.
+- **Deploy web** vía GitHub Actions o conectando el repo en Cloudflare.
 
-> Para tus amigos no hay configuración: les pasas la URL del Worker, entran con su email y pegan su iCal. Eso es todo.
+## Cómo funciona
 
----
+```
+Navegador ── Clerk (login) ──> obtiene token de sesión
+   │
+   └── fetch /api/* con  Authorization: Bearer <token Clerk> ──> Cloudflare Worker
+                                                                     │ verifica token (Clerk)
+                                                                     │ lee/escribe (service key)
+                                                                     └──> Supabase (Postgres)
+Cron 3×/día ─> Worker ─> por cada usuario con iCal: descarga, parsea, upsert tareas
+```
 
-## Stack
+El navegador solo conoce la **publishable key** de Clerk (pública). Las claves secretas (Clerk secret, Supabase service) viven únicamente en el Worker.
 
-- Cloudflare Workers (runtime + Cron Triggers)
-- TypeScript estricto
-- Supabase (Auth + Postgres + RLS)
-- Tailwind (CDN) y `@supabase/supabase-js` (CDN) en el frontend — sin build step
-- GitHub Actions (deploy automático con `cloudflare/wrangler-action`)
+## Secciones de la app
+
+1. **Resumen** — pendientes / hechas / total, barra de progreso y próximas tareas.
+2. **Materias** — tareas agrupadas por curso, cada una con su progreso.
+3. **Todas** — lista completa con filtros (todas / pendientes / hechas).
+4. **Ajustes** — nombre, URL iCal, **color de acento** (personalización) y sincronizar.
+
+Si entras y aún no has puesto tu enlace iCal, la app te lleva a una pantalla de **onboarding** para pegarlo.
 
 ## Zona horaria
 
-Toda la lógica de "semana actual" usa **America/Santo_Domingo (UTC-4, sin DST)**. Lunes 00:00 → Domingo 23:59:59 hora local.
-
-## Arquitectura
-
-```
-Browser  ──HTML+JS──>  Cloudflare Worker  ──REST──>  Supabase (Auth + DB)
-   │                         │                          │
-   │     magic link login    │                          │
-   └────supabase-js direct───┴── lecturas/updates ──────┘
-                             │
-              Cron x3/día ───┘  fetch iCal por usuario → upsert tasks
-```
-
-- El navegador habla **directamente** con Supabase para login, leer perfil y tareas, y togglear `status` (RLS asegura que cada usuario solo ve lo suyo).
-- El Worker se encarga de **servir el HTML** y de **sincronizar con Blackboard** (servicio que solo él puede hacer porque tiene la `service_role` key y respeta CORS).
-
-## Estructura
-
-```
-active-calendar/
-  src/
-    index.ts        # entry: GET / sirve la SPA, POST /api/sync, scheduled cron
-    html.ts         # SPA inline (HTML + JS) servida por el Worker
-    ical.ts         # parser VEVENT + filtro semanal
-    supabase.ts     # wrappers (admin + user)
-    diff.ts         # cálculo de deltas
-    time.ts         # zona horaria SDQ
-    types.ts        # tipos compartidos
-  .github/workflows/deploy.yml
-  schema.sql
-  wrangler.toml
-  package.json
-  tsconfig.json
-  .dev.vars.example
-  .gitignore
-  README.md
-```
+Toda la lógica de "semana actual" usa **America/Santo_Domingo (UTC-4, sin DST)**: lunes 00:00 → domingo 23:59:59.
 
 ---
 
 ## Cómo obtener tu URL iCal de Blackboard
 
-> El enlace es **personal** (contiene un token). No lo compartas. Solo lo pegas en tu propio perfil dentro de la app.
+> El enlace es **personal** (contiene un token). No lo compartas. Solo lo pegas en tu propio perfil.
 
-1. Inicia sesión en tu portal de Blackboard.
+1. Inicia sesión en el portal de Blackboard de tu universidad.
 2. Abre el **Calendario**.
-3. Busca el botón **"Get External Calendar Link"** / **"Obtener enlace de calendario externo"** / **"iCal Feed"** (suele estar en el menú de ajustes — engranaje o `⋯` — del calendario).
-4. Si nunca lo generaste, dale **Generar**. Si crees que alguien lo vio, **Regenera** para invalidar el viejo.
-5. Copia la URL (debe terminar en `.ics`).
-6. En la app, pégala en el campo "URL iCal de Blackboard" y pulsa **Guardar** y luego **Sincronizar**.
+3. Busca **"Get External Calendar Link"** / **"Obtener enlace de calendario externo"** / **"iCal Feed"** (menú de ajustes del calendario — engranaje o `⋯`).
+4. Genera el enlace (o **Regenera** si crees que se filtró). Debe terminar en `.ics`.
+5. Pégalo en la app (onboarding o Ajustes) y pulsa **Sincronizar**.
 
 ---
 
-## Setup (operador — una sola vez)
+# Setup completo (operador — una sola vez)
 
-### 1. Crear el proyecto en Supabase
+### Paso 1 — Supabase (base de datos)
 
-1. Crea proyecto en https://supabase.com (plan free es suficiente).
-2. SQL Editor → pega [`schema.sql`](schema.sql) → Run.
-3. **Authentication → Providers → Email** → asegúrate de que **Email** esté habilitado y **"Enable email confirmations"** está activado (es el magic link).
-4. **Authentication → URL Configuration**:
-   - `Site URL` → la URL de tu Worker (ej: `https://active-calendar.<tu-sub>.workers.dev`).
-   - `Redirect URLs` → añade la misma URL.
-5. **Project Settings → API** → copia:
-   - `Project URL` → `SUPABASE_URL`
-   - `anon public` → `SUPABASE_ANON_KEY`
-   - `service_role` → `SUPABASE_SERVICE_KEY` *(secreto — nunca expongas en el cliente)*
+1. Crea un proyecto en https://supabase.com (plan free).
+2. **SQL Editor** → pega [`schema.sql`](schema.sql) → **Run**. (Recrea las tablas; como no hay datos reales, no pasa nada.)
+3. **Project Settings → API** → copia:
+   - **Project URL** → será `SUPABASE_URL`.
+   - **service_role** secret → será `SUPABASE_SERVICE_KEY`.
+   > Ya **no** necesitamos la anon key ni el provider de Email: el login lo hace Clerk.
 
-### 2. Crear el Worker en Cloudflare (web, sin local)
+### Paso 2 — Clerk (login)
 
-Opción A — **todo desde GitHub** (recomendado):
+1. Entra a https://dashboard.clerk.com y crea una **Application** (o usa una existente).
+2. Elige los métodos de inicio de sesión que quieras (Google, email, etc.).
+3. En **API Keys** copia:
+   - **Publishable key** (`pk_...`) → es **pública**.
+   - **Secret key** (`sk_...`) → será `CLERK_SECRET_KEY` (secreta).
+4. En **Paths / Domains** (o "Allowed origins"): cuando tengas la URL final del Worker, añádela como dominio permitido del frontend. Para empezar, el dominio `*.workers.dev` funciona con las dev keys de Clerk.
+   > Sugerencia: usa las **dev keys** de Clerk mientras pruebas; pasa a **production keys** cuando uses un dominio propio.
 
-1. Sube este repo a GitHub (ya está listo).
-2. En **Cloudflare dashboard → Workers & Pages → Create → Workers → Connect a Git repo**.
-3. Selecciona el repo y confirma. Cloudflare detecta `wrangler.toml` y despliega solo.
-4. Una vez creado el Worker, ve a **Settings → Variables and Secrets** y añade:
-   - `SUPABASE_URL` (Type: **Secret**)
-   - `SUPABASE_ANON_KEY` (Type: **Secret** — aunque sea pública, así no queda en el repo)
-   - `SUPABASE_SERVICE_KEY` (Type: **Secret**)
-5. En **Settings → Variables** edita `APP_BASE_URL` (text) con la URL real del Worker.
+### Paso 3 — Poner la publishable key y la URL en `wrangler.toml`
 
-Opción B — **GitHub Actions** (push automático):
+Edita [`wrangler.toml`](wrangler.toml), sección `[vars]`:
 
-1. En GitHub → **Settings → Secrets and variables → Actions** añade:
-   - `CLOUDFLARE_API_TOKEN` (créalo en Cloudflare con plantilla "Edit Cloudflare Workers")
-   - `CLOUDFLARE_ACCOUNT_ID` (lo encuentras en el dashboard de Cloudflare, columna derecha)
-2. Haz `git push` a `main`. El workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) corre `tsc --noEmit` y `wrangler deploy`.
-3. La primera vez carga los secrets en el dashboard como en Opción A (sólo se hace una vez).
+```toml
+[vars]
+APP_BASE_URL = "https://active-calendar.TUSUB.workers.dev"
+CLERK_PUBLISHABLE_KEY = "pk_test_xxxxxxxx"   # pega tu publishable key real
+```
 
-### 3. Configurar Supabase con la URL final
+> Estas dos variables son públicas y se versionan en el repo. Lo que pongas aquí **sobrescribe** el dashboard en cada deploy, así que este archivo es la fuente de verdad para ellas.
 
-Una vez tengas la URL del Worker (ej. `https://active-calendar.tusub.workers.dev`):
-- Actualiza `Site URL` y `Redirect URLs` en Supabase con esa URL.
-- Actualiza la variable `APP_BASE_URL` en el Worker con esa URL.
+Haz commit y push de ese cambio.
 
-### 4. Probar
+### Paso 4 — Desplegar el Worker
+
+**Opción A — Dashboard de Cloudflare (lo más simple):**
+1. **Workers & Pages → Create → Workers → Connect to Git** → selecciona el repo.
+2. Cloudflare detecta `wrangler.toml` y despliega.
+
+**Opción B — GitHub Actions (push = deploy):**
+1. En Cloudflare: **My Profile → API Tokens → Create Token** → plantilla **"Edit Cloudflare Workers"** → copia el token.
+2. **Account ID**: en **Workers & Pages**, columna derecha.
+3. En GitHub: **Settings → Secrets and variables → Actions → New repository secret**:
+   - `CLOUDFLARE_API_TOKEN`
+   - `CLOUDFLARE_ACCOUNT_ID`
+4. `git push` a `main` → el workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) corre `tsc` y `wrangler deploy`.
+
+### Paso 5 — Cargar los 3 secrets en el Worker
+
+En **Workers & Pages → active-calendar → Settings → Variables and Secrets** añade (tipo **Secret**):
+
+| Nombre | Valor |
+|---|---|
+| `CLERK_SECRET_KEY` | la `sk_...` de Clerk |
+| `SUPABASE_URL` | el Project URL de Supabase |
+| `SUPABASE_SERVICE_KEY` | la service_role key de Supabase |
+
+> Con `wrangler` local sería: `npx wrangler secret put CLERK_SECRET_KEY` (y los otros dos).
+
+### Paso 6 — Ajustar la URL final
+
+Cuando tengas la URL real del Worker:
+- Confirma que `APP_BASE_URL` y la publishable key en `wrangler.toml` son correctas (redeploy si las cambiaste).
+- En **Clerk dashboard**, añade esa URL como dominio/origen permitido del frontend.
+
+### Paso 7 — Probar
 
 1. Abre la URL del Worker.
-2. Ingresa tu email → revisa la bandeja → clic al enlace.
-3. Pega tu URL iCal → **Guardar** → **Sincronizar**.
-4. Deberías ver tus tareas de la semana. Marca alguna como hecha.
+2. Inicia sesión con Clerk.
+3. Pega tu URL iCal en el onboarding → **Guardar y sincronizar**.
+4. Explora las secciones, marca tareas, cambia el color de acento.
 
-### 5. Compartir con tus amigos
+### Paso 8 — Compartir con tus amigos
 
-Solo dales la URL del Worker. Cada quien crea su sesión con su email y pega su propia iCal.
+Dales la URL. Cada quien crea su cuenta con Clerk y pega su propio iCal. Sus datos quedan aislados por su `user_id` de Clerk.
 
 ---
 
 ## Cron triggers
 
-| Cron UTC     | Hora SDQ | Qué hace                                              |
-|--------------|----------|-------------------------------------------------------|
-| `0 11 * * *` | 07:00    | Refresca tareas de la semana de todos los usuarios    |
-| `0 15 * * *` | 11:00    | Refresca tareas de la semana de todos los usuarios    |
-| `0 23 * * *` | 19:00    | Refresca tareas de la semana de todos los usuarios    |
+| Cron UTC     | Hora SDQ | Qué hace                                    |
+|--------------|----------|----------------------------------------------|
+| `0 11 * * *` | 07:00    | Refresca tareas de la semana de todos        |
+| `0 15 * * *` | 11:00    | Refresca tareas de la semana de todos        |
+| `0 23 * * *` | 19:00    | Refresca tareas de la semana de todos        |
 
-El cron preserva el `status` que el usuario haya marcado a mano.
+El cron preserva el `status` que cada usuario marcó a mano.
 
-## Endpoints HTTP
+## Endpoints
 
 - `GET /` — SPA.
-- `POST /api/sync` — `Authorization: Bearer <jwt>` del usuario. Refresca su iCal en el momento.
+- `GET /api/me` — perfil + tareas de la semana (crea el perfil si no existe).
+- `POST /api/profile` — actualiza nombre / iCal / acento.
+- `POST /api/task` — `{ uid, status }`.
+- `POST /api/sync` — refresca el iCal del usuario al momento.
 - `GET /api/health` — `{ ok: true }`.
 
-## Desarrollo local (opcional)
+Todas (salvo `/` y `/api/health`) exigen `Authorization: Bearer <token de Clerk>`.
+
+## Desarrollo local
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # rellena valores
-npm run dev
+cp .dev.vars.example .dev.vars   # rellena CLERK_SECRET_KEY, SUPABASE_*, CLERK_PUBLISHABLE_KEY
+npm run dev                       # http://localhost:8787
+npm run typecheck
 ```
-
-`npm run typecheck` para validar tipos.
 
 ## Roadmap
 
-- **v1 (actual)**: dashboard web, login email, sync manual + cron 3×/día, checks.
-- **v2**: digest semanal por email (Resend) los domingos con el resumen del lunes.
-- **v3**: exportar tareas pendientes como `.ics` para enchufar a Google/Apple Calendar.
+- **v1 (actual)**: login Clerk, dashboard con secciones, materias, filtros, personalización, sync manual + cron.
+- **v2**: notificaciones — empezamos por email digest y luego **WhatsApp** (Cloud API de Meta) como canal principal de avisos.
+- **v3**: exportar pendientes como `.ics`.
 
 ---
 
-## Qué debes hacer **tú** manualmente (una vez)
+## Qué debes hacer **tú** manualmente (resumen)
 
-1. Crear el proyecto en **Supabase** y correr [`schema.sql`](schema.sql).
-2. Habilitar el provider **Email** en Supabase y configurar `Site URL` / `Redirect URLs`.
-3. Subir este repo a GitHub.
-4. Crear el Worker en Cloudflare conectando el repo de GitHub (o configurar el secret `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` en GitHub Actions).
-5. Añadir como secrets en el Worker: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`.
-6. Editar la variable `APP_BASE_URL` con la URL real del Worker.
-7. Abrir la URL, hacer login con tu email, pegar tu iCal y compartir la URL con tus amigos.
+1. Crear proyecto **Supabase** + correr [`schema.sql`](schema.sql). Copiar Project URL y service_role key.
+2. Crear app en **Clerk**. Copiar publishable (`pk_`) y secret (`sk_`) keys.
+3. Pegar `APP_BASE_URL` y `CLERK_PUBLISHABLE_KEY` en [`wrangler.toml`](wrangler.toml) y hacer push.
+4. Desplegar el Worker (dashboard de Cloudflare o GitHub Actions con sus 2 secrets).
+5. Cargar en el Worker los 3 secrets: `CLERK_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
+6. Añadir la URL del Worker como origen permitido en Clerk.
+7. Abrir la URL, login, pegar tu iCal, compartir.
