@@ -3,10 +3,12 @@ import type { Env } from './types';
 /** SPA mínima servida por el Worker. Usa Supabase JS + Tailwind por CDN. */
 export function renderApp(env: Env): string {
   // Inyectamos URL y anon key como constantes globales seguras para el cliente.
+  // Usamos null (no undefined) para que JSON.stringify no omita las claves; asi
+  // el frontend puede detectar config faltante y mostrar un mensaje claro.
   const cfg = JSON.stringify({
-    SUPABASE_URL: env.SUPABASE_URL,
-    SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
-    APP_BASE_URL: env.APP_BASE_URL,
+    SUPABASE_URL: env.SUPABASE_URL ?? null,
+    SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY ?? null,
+    APP_BASE_URL: env.APP_BASE_URL ?? null,
   });
 
   return `<!DOCTYPE html>
@@ -30,11 +32,24 @@ export function renderApp(env: Env): string {
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const cfg = window.__CFG__;
+const app = document.getElementById('app');
+
+// Si faltan las variables de entorno del Worker, mostramos un aviso claro
+// en vez de una pantalla en blanco.
+if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
+  app.innerHTML = '<div class="fade-in bg-amber-50 border border-amber-300 rounded-xl p-5">' +
+    '<h1 class="text-xl font-semibold mb-2">Falta configuración</h1>' +
+    '<p class="text-neutral-700 text-sm mb-2">El Worker está corriendo pero no tiene cargadas las variables de Supabase.</p>' +
+    '<p class="text-neutral-700 text-sm">Añade en Cloudflare (Workers → tu Worker → Settings → Variables and Secrets) las claves ' +
+    '<code class="bg-neutral-200 px-1 rounded">SUPABASE_URL</code>, ' +
+    '<code class="bg-neutral-200 px-1 rounded">SUPABASE_ANON_KEY</code> y ' +
+    '<code class="bg-neutral-200 px-1 rounded">SUPABASE_SERVICE_KEY</code>, luego vuelve a desplegar.</p></div>';
+  throw new Error('Config faltante: SUPABASE_URL / SUPABASE_ANON_KEY');
+}
+
 const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 });
-
-const app = document.getElementById('app');
 
 function el(html) {
   const t = document.createElement('template');
