@@ -2,6 +2,8 @@ name = "active-calendar"
 main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
+# Minifica el bundle del Worker en cada deploy (más liviano y menos legible).
+minify = true
 
 # Cron triggers (UTC). Los 3 "0 11/15/23" = 07:00/11:00/19:00 SDQ: sincronizan el
 # iCal de todos los usuarios. El "*/30" corre cada 30 min y solo despacha los

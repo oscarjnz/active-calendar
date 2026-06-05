@@ -47,6 +47,12 @@ create table tasks (
 );
 
 create index if not exists idx_tasks_user_due on tasks(user_id, due);
+-- Búsquedas del bot de Telegram (webhook y vinculación). Parciales: solo filas
+-- con valor, para que el índice sea pequeño y rápido aun con miles de usuarios.
+create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
+create index if not exists idx_profiles_tg_code on profiles(telegram_link_code) where telegram_link_code is not null;
+-- Recordatorios: el cron filtra por día elegido; índice por canal activo.
+create index if not exists idx_profiles_notify on profiles(notify_dow) where email_notify or telegram_notify;
 
 -- RLS: solo el Worker (service_role) toca estas tablas. El navegador NUNCA habla
 -- directo con Supabase, así que bloqueamos todo acceso anónimo/autenticado.
@@ -83,3 +89,6 @@ alter table profiles add column if not exists telegram_notify boolean not null d
 alter table profiles add column if not exists telegram_link_code text;
 alter table profiles add column if not exists last_telegram timestamptz;
 alter table tasks add column if not exists course_code text;
+create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
+create index if not exists idx_profiles_tg_code on profiles(telegram_link_code) where telegram_link_code is not null;
+create index if not exists idx_profiles_notify on profiles(notify_dow) where email_notify or telegram_notify;

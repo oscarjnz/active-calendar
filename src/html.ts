@@ -14,6 +14,11 @@ export function renderApp(env: Env): string {
   const week = JSON.stringify(currentAcademicWeek());
 
   return `<!DOCTYPE html>
+<!--
+  Active Calendar — Developed by Oscar O. Jiménez
+  © 2026 Oscar O. Jiménez. Todos los derechos reservados.
+  Software propietario. Prohibida su copia, distribución o uso no autorizado.
+-->
 <html lang="es" class="h-full">
 <head>
 <meta charset="utf-8" />
@@ -78,7 +83,7 @@ export function renderApp(env: Env): string {
   }
 </style>
 </head>
-<body class="h-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+<body class="h-full overflow-x-hidden bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
 <div id="root" class="min-h-full"></div>
 
 <script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week};</script>
@@ -106,12 +111,17 @@ function fmtCourse(code, name) {
   const nm = String(name || '').toUpperCase();
   return code ? (normCode(code) + ' · ' + nm) : nm;
 }
+// ¿La materia tiene nombre real? (no vacío y distinto del código).
+function hasRealName(c) {
+  const name = String(c && c.name || '').trim();
+  return !!name && normCode(name) !== normCode(c.code);
+}
 // Materias del estudiante para los selectores (las del perfil; si no hay, las del cuatrimestre).
 function myCourses() {
-  const cs = state.profile?.courses || [];
+  const cs = (state.profile?.courses || []).filter(hasRealName);
   if (cs.length) return cs.slice().sort((a,b) => a.name.localeCompare(b.name, 'es'));
   const term = state.profile?.term;
-  if (term) return PENSUM.filter(c => c.sem === term).map(c => ({ code: c.code, name: c.name }));
+  if (term) return PENSUM.filter(c => c.sem === term && !c.elective).map(c => ({ code: c.code, name: c.name }));
   return [];
 }
 
@@ -283,6 +293,7 @@ function renderLanding() {
           <p class="text-neutral-600 dark:text-neutral-300 mb-6 md:hidden">Tus tareas de Blackboard en un solo lugar.</p>
           <div id="signin"></div>
           <p class="mt-6 text-center text-xs text-neutral-400 dark:text-neutral-500"><button id="privacyLink" class="pressable underline decoration-dotted hover:decoration-solid hover:text-neutral-600 dark:hover:text-neutral-300">Políticas de privacidad</button></p>
+          <p class="mt-2 text-center text-xs text-neutral-300 dark:text-neutral-600">Developed by Oscar O. Jiménez</p>
         </div>
       </div>
     </div>
@@ -514,10 +525,15 @@ function stats() {
   const done = state.tasks.filter(t => t.status === 'done').length;
   return { total, done, pending: total - done, pct: total ? Math.round(done / total * 100) : 0 };
 }
-// Materia de una tarea como {code,name}, o null si no tiene.
+// Materia de una tarea como {code,name}, o null si no tiene o si no conocemos su
+// nombre real (en ese caso se trata como "Sin materia", no mostramos códigos sueltos).
 function taskCourse(t) {
-  if (t.course_code) return { code: normCode(t.course_code), name: courseName(t.course_code) };
-  if (t.course) return { code: null, name: t.course };
+  if (t.course_code) {
+    const code = normCode(t.course_code);
+    const name = courseName(t.course_code);
+    if (name && normCode(name) !== code) return { code, name };
+  }
+  if (t.course) return { code: null, name: String(t.course).trim() };
   return null;
 }
 // Agrupa tareas por materia. Devuelve [{code,name,label,tasks}], "Sin materia" al final.
@@ -546,10 +562,10 @@ function taskRow(t) {
     <div class="card flex items-start gap-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-3 hover:border-neutral-300 dark:hover:border-neutral-700 hover:shadow-sm">
       <input type="checkbox" class="chk mt-0.5 h-4 w-4 accent-neutral-900 cursor-pointer shrink-0" \${done ? 'checked' : ''} />
       <div class="flex-1 min-w-0">
-        <div class="text-sm \${done ? 'line-through text-neutral-400 dark:text-neutral-600' : 'font-medium'}">\${esc(t.summary)}</div>
-        <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div class="text-sm break-words \${done ? 'line-through text-neutral-400 dark:text-neutral-600' : 'font-medium'}">\${esc(t.summary)}</div>
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
           <span>\${esc(fmtDue(t.due))}</span>
-          <span class="materia-slot"></span>
+          <span class="materia-slot min-w-0 max-w-full"></span>
           \${t.url ? '<a class="underline decoration-dotted hover:decoration-solid" target="_blank" rel="noopener" href="'+esc(t.url)+'">abrir en Blackboard</a>' : ''}
         </div>
       </div>
@@ -583,7 +599,7 @@ function taskRow(t) {
     function buildSelect() {
       const first = cur ? '<option value="">— Sin materia</option>' : '<option value="">+ Asignar materia</option>';
       const body = optList.map(c => '<option value="'+esc(c.code)+'"'+((cur && cur.code && cur.code === normCode(c.code))?' selected':'')+'>'+esc(fmtCourse(c.code, c.name))+'</option>').join('');
-      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 '+a.ring+'">'+first+body+'</select>');
+      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 max-w-full min-w-0 truncate '+a.ring+'">'+first+body+'</select>');
       sel.addEventListener('change', async (e) => {
         const code = e.target.value || null;
         e.target.disabled = true;
@@ -602,7 +618,7 @@ function taskRow(t) {
 
     if (cur) {
       // Materia asignada: chip con punto de color; clic para editarla.
-      const chip = el('<button type="button" title="Cambiar materia" class="pressable inline-flex items-center gap-1 '+a.text+' hover:opacity-80"><span class="inline-block h-1.5 w-1.5 rounded-full '+a.dot+'"></span>'+esc(fmtCourse(cur.code, cur.name))+'<span class="text-neutral-400 dark:text-neutral-500 text-[10px]">✎</span></button>');
+      const chip = el('<button type="button" title="Cambiar materia" class="pressable inline-flex items-center gap-1 max-w-full min-w-0 '+a.text+' hover:opacity-80"><span class="inline-block h-1.5 w-1.5 rounded-full shrink-0 '+a.dot+'"></span><span class="truncate">'+esc(fmtCourse(cur.code, cur.name))+'</span><span class="text-neutral-400 dark:text-neutral-500 text-[10px] shrink-0">✎</span></button>');
       chip.addEventListener('click', () => { const s = buildSelect(); chip.replaceWith(s); s.focus(); });
       slot.replaceWith(chip);
     } else if (optList.length) {
@@ -1008,9 +1024,12 @@ function renderShell() {
         \${TABS.map(([k,l]) => '<button data-tab="'+k+'" class="tabbtn px-3 py-2 text-sm rounded-lg whitespace-nowrap">'+l+'</button>').join('')}
       </nav>
       <main id="tabContent"></main>
-      <footer class="mt-10 pt-4 border-t border-neutral-200 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-400 dark:text-neutral-500">
-        <span>© 2026 Active Calendar</span>
-        <button id="privacyLink" class="pressable hover:text-neutral-700 dark:hover:text-neutral-300 underline decoration-dotted hover:decoration-solid">Políticas de privacidad</button>
+      <footer class="mt-10 pt-4 border-t border-neutral-200 dark:border-neutral-800 text-xs text-neutral-400 dark:text-neutral-500">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span>© 2026 Active Calendar</span>
+          <button id="privacyLink" class="pressable hover:text-neutral-700 dark:hover:text-neutral-300 underline decoration-dotted hover:decoration-solid">Políticas de privacidad</button>
+        </div>
+        <p class="mt-2 text-center sm:text-left">Developed by <span class="font-medium text-neutral-500 dark:text-neutral-400">Oscar O. Jiménez</span></p>
       </footer>
     </div>
   \`);
@@ -1060,6 +1079,14 @@ function fatal(e) {
     '</div></div>';
   console.error(e);
 }
+
+// Firma de autoría + aviso. (El código del navegador siempre es visible; esto
+// deja claro que es propietario y de quién es.)
+try {
+  console.log('%cActive Calendar', 'font-size:20px;font-weight:700;color:#0a0a0a;background:#fafafa;padding:4px 8px;border-radius:6px;');
+  console.log('%cDeveloped by Oscar O. Jiménez · © 2026 · Todos los derechos reservados.', 'color:#737373;');
+  console.log('%c⚠️ Software propietario. Prohibida su copia o redistribución no autorizada.', 'color:#b91c1c;font-weight:600;');
+} catch (e) {}
 
 setupThemeToggle();
 try {

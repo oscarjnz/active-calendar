@@ -20,6 +20,10 @@ jobs:
 
       - run: npx tsc --noEmit
 
+      # Minifica el JS del cliente embebido en html.ts (solo en CI; el repo
+      # queda legible). Lo desplegado al navegador va minificado/ofuscado.
+      - run: node scripts/minify-client.mjs
+
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
