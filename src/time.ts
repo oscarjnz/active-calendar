@@ -70,6 +70,54 @@ export function formatRangeSdq(start: Date, end: Date): string {
   return `${String(a.day).padStart(2, '0')}/${am} - ${String(b.day).padStart(2, '0')}/${bm} ${b.year}`;
 }
 
+// --- Calendario académico UNIBE: 3 bloques de 4 meses, 15 semanas cada uno ---
+// Bloque 1: Sep–Dic (inicia septiembre) · Bloque 2: Ene–Abr (inicia enero) ·
+// Bloque 3: May–Ago (inicia mayo). La "semana 1" es la 1era semana oficial del
+// mes de inicio: el primer lunes que cae en ese mes (si el 1 es sábado, la
+// semana 1 arranca el lunes siguiente).
+
+export interface AcademicWeek {
+  block: 1 | 2 | 3;
+  blockLabel: string; // "Sep–Dic"
+  week: number | null; // 1-15, o null si estamos en receso (fuera del rango)
+}
+
+/** Lunes de la 1era semana oficial del mes (primer lunes que cae en el mes). */
+function firstMondayOfMonth(year: number, month: number): Date {
+  const first = fromSdq(year, month, 1);
+  const wd = toSdqParts(first).weekday; // 1=Lun..7=Dom
+  const add = wd === 1 ? 0 : 8 - wd; // días hasta el próximo lunes
+  return new Date(first.getTime() + add * 86_400_000);
+}
+
+const BLOCK_LABELS: Record<1 | 2 | 3, string> = { 1: 'Sep–Dic', 2: 'Ene–Abr', 3: 'May–Ago' };
+
+/** Bloque y semana (1-15) en que se encuentra el estudiante según la fecha. */
+export function currentAcademicWeek(now: Date = new Date()): AcademicWeek {
+  const p = toSdqParts(now);
+  let block: 1 | 2 | 3;
+  let startMonth: number;
+  if (p.month >= 9) {
+    block = 1;
+    startMonth = 9;
+  } else if (p.month <= 4) {
+    block = 2;
+    startMonth = 1;
+  } else {
+    block = 3;
+    startMonth = 5;
+  }
+  const firstMon = firstMondayOfMonth(p.year, startMonth);
+  const { start: curMon } = currentWeekRangeSdq(now);
+  const diffWeeks = Math.round((curMon.getTime() - firstMon.getTime()) / (7 * 86_400_000));
+  const week = diffWeeks + 1;
+  return {
+    block,
+    blockLabel: BLOCK_LABELS[block],
+    week: week >= 1 && week <= 15 ? week : null,
+  };
+}
+
 /** True si la hora actual local SDQ corresponde al resumen matutino (~7 AM, ventana 6-8). */
 export function isMorningWindowSdq(now: Date = new Date()): boolean {
   const h = toSdqParts(now).hour;
