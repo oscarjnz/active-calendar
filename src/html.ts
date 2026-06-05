@@ -636,6 +636,18 @@ function renderAjustes(node) {
         <label class="block text-sm">URL iCal</label>
         <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
       </div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="font-medium">Recordatorio por correo</h3>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Un resumen diario de tus pendientes a \${esc(p.email||'tu correo')} cada mañana.</p>
+            <span id="nmsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
+          </div>
+          <button id="emailToggle" role="switch" aria-checked="\${p.email_notify?'true':'false'}" class="pressable shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 [transition-timing-function:var(--ease-out)] \${p.email_notify?a.bar:'bg-neutral-300 dark:bg-neutral-700'}">
+            <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 [transition-timing-function:var(--ease-out)] \${p.email_notify?'translate-x-5':'translate-x-0.5'}"></span>
+          </button>
+        </div>
+      </div>
       <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <div class="flex items-center justify-between">
           <h3 class="font-medium">Cuatrimestre y materias</h3>
@@ -672,6 +684,32 @@ function renderAjustes(node) {
       cmsg.textContent = 'Materias guardadas.';
       renderTab();
     } catch (err) { cmsg.textContent = 'Error: ' + err.message; btn.disabled = false; }
+  });
+
+  // Toggle de recordatorio por correo: guarda al instante.
+  const toggle = card.querySelector('#emailToggle');
+  const knob = toggle.querySelector('span');
+  const nmsg = card.querySelector('#nmsg');
+  function paintToggle(on) {
+    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+    toggle.classList.toggle(ac().bar, on);
+    toggle.classList.toggle('bg-neutral-300', !on);
+    toggle.classList.toggle('dark:bg-neutral-700', !on);
+    knob.classList.toggle('translate-x-5', on);
+    knob.classList.toggle('translate-x-0.5', !on);
+  }
+  toggle.addEventListener('click', async () => {
+    const next = toggle.getAttribute('aria-checked') !== 'true';
+    paintToggle(next);
+    nmsg.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ email_notify: next }) });
+      state.profile = r.profile;
+      nmsg.textContent = next ? 'Recordatorio activado.' : 'Recordatorio desactivado.';
+    } catch (err) {
+      paintToggle(!next);
+      nmsg.textContent = 'Error: ' + err.message;
+    }
   });
 
   const accents = card.querySelector('#accents');

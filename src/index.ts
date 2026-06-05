@@ -7,6 +7,7 @@ import {
   getProfile,
   listAllProfilesWithIcal,
   listWeekTasks,
+  markEmailed,
   mergeCourses,
   setProfileCourses,
   setTaskCourse,
@@ -15,7 +16,8 @@ import {
   upsertEvents,
 } from './supabase';
 import { getAuthUserId } from './clerk';
-import { currentWeekRangeSdq } from './time';
+import { currentAcademicWeek, currentWeekRangeSdq, isMorningWindowSdq, toSdqParts } from './time';
+import { sendWeeklyEmail } from './email';
 import { renderApp } from './html';
 
 // Logo / favicon: marca minimalista (calendario + check) en SVG. Se sirve como
@@ -66,6 +68,31 @@ async function syncOne(
   return { weekCount: inWeek.length, created: delta.created.length, modified: delta.modified.length };
 }
 
+function sameSdqDay(a: Date, b: Date): boolean {
+  const pa = toSdqParts(a);
+  const pb = toSdqParts(b);
+  return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;
+}
+
+/**
+ * Envía el recordatorio diario por correo si corresponde: el usuario lo quiere,
+ * tiene correo, hay pendientes y no se le ha enviado hoy. Silencioso si no aplica.
+ */
+async function maybeEmail(
+  env: Env,
+  sb: ReturnType<typeof adminClient>,
+  profile: Profile,
+): Promise<void> {
+  if (!env.RESEND_API_KEY || !profile.email || !profile.email_notify) return;
+  if (profile.last_emailed && sameSdqDay(new Date(profile.last_emailed), new Date())) return;
+  const { start, end } = currentWeekRangeSdq();
+  const tasks = await listWeekTasks(sb, profile.user_id, start, end);
+  const pending = tasks.filter((t) => t.status === 'pending');
+  if (pending.length === 0) return;
+  await sendWeeklyEmail(env, profile, pending, currentAcademicWeek());
+  await markEmailed(sb, profile.user_id);
+}
+
 function json(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -86,6 +113,9 @@ export default {
         try {
           const sb = adminClient(env);
           const profiles = await listAllProfilesWithIcal(sb);
+          // El recordatorio por correo solo se manda en la corrida matutina (~7 AM
+          // SDQ), así cada usuario recibe a lo sumo un correo al día.
+          const morning = isMorningWindowSdq();
           const concurrency = 5;
           let i = 0;
           const worker = async (): Promise<void> => {
@@ -95,6 +125,13 @@ export default {
                 await syncOne(env, p);
               } catch (err) {
                 console.error(`sync user ${p.user_id}:`, (err as Error).message);
+              }
+              if (morning) {
+                try {
+                  await maybeEmail(env, sb, p);
+                } catch (err) {
+                  console.error(`email user ${p.user_id}:`, (err as Error).message);
+                }
               }
             }
           };
@@ -152,6 +189,7 @@ export default {
           accent?: string;
           term?: number | null;
           courses?: { code: string; name: string }[];
+          email_notify?: boolean;
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });
