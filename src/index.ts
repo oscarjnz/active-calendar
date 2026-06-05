@@ -84,8 +84,9 @@ function notifyTimeReached(notifyTime: string | null, now: Date): boolean {
 }
 
 /**
- * Envía el recordatorio diario por correo si corresponde: el usuario lo quiere,
- * tiene correo, ya pasó SU hora elegida, hay pendientes y no se le ha enviado hoy.
+ * Envía el recordatorio SEMANAL por correo si corresponde: el usuario lo quiere,
+ * tiene correo, hoy es SU día elegido, ya pasó SU hora, hay pendientes y no se le
+ * ha enviado hoy. Como solo un día de la semana coincide, sale un correo/semana.
  * Silencioso si no aplica.
  */
 async function maybeEmail(
@@ -96,6 +97,8 @@ async function maybeEmail(
 ): Promise<void> {
   if (!env.RESEND_API_KEY || !profile.email || !profile.email_notify) return;
   if (profile.last_emailed && sameSdqDay(new Date(profile.last_emailed), now)) return;
+  const dow = profile.notify_dow >= 1 && profile.notify_dow <= 7 ? profile.notify_dow : 1;
+  if (toSdqParts(now).weekday !== dow) return;
   if (!notifyTimeReached(profile.notify_time, now)) return;
   const { start, end } = currentWeekRangeSdq();
   const tasks = await listWeekTasks(sb, profile.user_id, start, end);
@@ -206,6 +209,7 @@ export default {
           term?: number | null;
           courses?: { code: string; name: string }[];
           email_notify?: boolean;
+          notify_dow?: number;
           notify_time?: string;
         };
         const profile = await updateProfile(sb, u, body);

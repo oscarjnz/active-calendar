@@ -81,7 +81,7 @@ function buildHtml(profile: Profile, pending: TaskRow[], week: AcademicWeek, app
     <a href="${esc(appUrl)}" style="display:inline-block;background:#0a0a0a;color:#ffffff;text-decoration:none;font-size:14px;font-weight:500;padding:10px 18px;border-radius:10px;">Ver mis tareas</a>
   </td></tr>
   <tr><td style="padding:0 24px 24px;">
-    <p style="margin:0;font-size:11px;color:#a3a3a3;">Recibes este correo porque activaste el recordatorio diario. Puedes desactivarlo en Ajustes.</p>
+    <p style="margin:0;font-size:11px;color:#a3a3a3;">Recibes este correo porque activaste el recordatorio semanal. Puedes cambiar el día/hora o desactivarlo en Ajustes.</p>
   </td></tr>
 </table>
 </td></tr>
@@ -90,7 +90,7 @@ function buildHtml(profile: Profile, pending: TaskRow[], week: AcademicWeek, app
 }
 
 /**
- * Envía el recordatorio diario por correo vía Resend. Lanza si la API responde mal.
+ * Envía el recordatorio semanal por correo vía Resend. Lanza si la API responde mal.
  * Asume que ya se validó que hay pendientes y que el usuario quiere el correo.
  */
 export async function sendWeeklyEmail(

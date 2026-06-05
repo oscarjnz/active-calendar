@@ -19,7 +19,8 @@ create table profiles (
   accent text not null default 'neutral',
   term int,                                 -- cuatrimestre/semestre actual (1-12)
   courses jsonb not null default '[]'::jsonb, -- materias: [{code,name}, ...]
-  email_notify boolean not null default true, -- recibir recordatorio diario por correo
+  email_notify boolean not null default true, -- recibir recordatorio semanal por correo
+  notify_dow int not null default 1,         -- día del envío (1=Lun..7=Dom)
   notify_time text not null default '07:00', -- hora local SDQ "HH:MM" del envío
   last_emailed timestamptz,                 -- último correo enviado (anti-duplicados)
   created_at timestamptz not null default now(),
@@ -70,6 +71,7 @@ create trigger trg_profiles_touch
 alter table profiles add column if not exists term int;
 alter table profiles add column if not exists courses jsonb not null default '[]'::jsonb;
 alter table profiles add column if not exists email_notify boolean not null default true;
+alter table profiles add column if not exists notify_dow int not null default 1;
 alter table profiles add column if not exists notify_time text not null default '07:00';
 alter table profiles add column if not exists last_emailed timestamptz;
 alter table tasks add column if not exists course_code text;

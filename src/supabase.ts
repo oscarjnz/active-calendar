@@ -74,6 +74,7 @@ export async function updateProfile(
     term?: number | null;
     courses?: Course[];
     email_notify?: boolean;
+    notify_dow?: number;
     notify_time?: string;
   },
 ): Promise<Profile> {
@@ -81,6 +82,10 @@ export async function updateProfile(
   if ('display_name' in fields) patch.display_name = fields.display_name?.trim() || null;
   if ('ical_url' in fields) patch.ical_url = fields.ical_url?.trim() || null;
   if ('email_notify' in fields) patch.email_notify = !!fields.email_notify;
+  if ('notify_dow' in fields) {
+    const d = fields.notify_dow;
+    patch.notify_dow = typeof d === 'number' && d >= 1 && d <= 7 ? Math.floor(d) : 1;
+  }
   if ('notify_time' in fields) {
     const t = (fields.notify_time ?? '').trim();
     // Solo HH:MM 24h válido; si no, caemos al default 07:00.

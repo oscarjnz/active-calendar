@@ -639,8 +639,8 @@ function renderAjustes(node) {
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h3 class="font-medium">Recordatorio por correo</h3>
-            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Un resumen de tus pendientes a \${esc(p.email||'tu correo')}, a la hora que tú elijas.</p>
+            <h3 class="font-medium">Recordatorio semanal por correo</h3>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Un resumen de tus pendientes a \${esc(p.email||'tu correo')}, una vez por semana, el día y la hora que tú elijas.</p>
             <span id="nmsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
           </div>
           <button id="emailToggle" role="switch" aria-checked="\${p.email_notify?'true':'false'}" class="pressable shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 [transition-timing-function:var(--ease-out)] \${p.email_notify?a.bar:'bg-neutral-300 dark:bg-neutral-700'}">
@@ -648,9 +648,13 @@ function renderAjustes(node) {
           </button>
         </div>
         <div id="notifyRow" class="flex flex-wrap items-center gap-3 transition-opacity duration-200 \${p.email_notify?'':'opacity-50 pointer-events-none'}">
-          <label class="text-sm" for="notifyTime">Hora de envío</label>
+          <label class="text-sm" for="notifyDow">Cada</label>
+          <select id="notifyDow" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm \${a.ring} focus:outline-none focus:ring-2">
+            \${[[1,'lunes'],[2,'martes'],[3,'miércoles'],[4,'jueves'],[5,'viernes'],[6,'sábado'],[7,'domingo']].map(d => '<option value="'+d[0]+'"'+((p.notify_dow||1)===d[0]?' selected':'')+'>'+d[1]+'</option>').join('')}
+          </select>
+          <label class="text-sm" for="notifyTime">a las</label>
           <input id="notifyTime" type="time" value="\${esc(p.notify_time||'07:00')}" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm \${a.ring} focus:outline-none focus:ring-2" />
-          <span class="text-xs text-neutral-400 dark:text-neutral-500">hora de RD · se envía a esa hora (±30 min)</span>
+          <span class="text-xs text-neutral-400 dark:text-neutral-500">hora de RD (±30 min)</span>
           <button id="testEmail" class="pressable ml-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm">Enviar prueba</button>
         </div>
       </div>
@@ -721,18 +725,25 @@ function renderAjustes(node) {
     }
   });
 
-  // Hora personalizada: guarda al cambiar.
+  // Día y hora personalizados: guardan al cambiar.
+  const DOW_NAMES = { 1:'lunes', 2:'martes', 3:'miércoles', 4:'jueves', 5:'viernes', 6:'sábado', 7:'domingo' };
+  const notifyDow = card.querySelector('#notifyDow');
   const notifyTime = card.querySelector('#notifyTime');
-  notifyTime.addEventListener('change', async () => {
-    const val = notifyTime.value || '07:00';
-    nmsg.textContent = 'Guardando hora…';
+  async function saveSchedule(label) {
+    nmsg.textContent = 'Guardando…';
     try {
-      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ notify_time: val }) });
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({
+        notify_dow: parseInt(notifyDow.value, 10) || 1,
+        notify_time: notifyTime.value || '07:00',
+      })});
       state.profile = r.profile;
+      notifyDow.value = String(r.profile.notify_dow || 1);
       notifyTime.value = r.profile.notify_time || '07:00';
-      nmsg.textContent = 'Hora guardada: ' + (r.profile.notify_time || '07:00') + '.';
+      nmsg.textContent = 'Listo: cada ' + (DOW_NAMES[r.profile.notify_dow] || 'lunes') + ' a las ' + (r.profile.notify_time || '07:00') + '.';
     } catch (err) { nmsg.textContent = 'Error: ' + err.message; }
-  });
+  }
+  notifyDow.addEventListener('change', saveSchedule);
+  notifyTime.addEventListener('change', saveSchedule);
 
   // Botón de prueba: dispara un correo ahora.
   card.querySelector('#testEmail').addEventListener('click', async (e) => {
