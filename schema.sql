@@ -17,6 +17,8 @@ create table profiles (
   avatar_url text,
   ical_url text,
   accent text not null default 'neutral',
+  term int,                                 -- cuatrimestre/semestre actual (1-12)
+  courses jsonb not null default '[]'::jsonb, -- materias: [{code,name}, ...]
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -26,6 +28,7 @@ create table tasks (
   uid text not null,
   summary text not null,
   course text,
+  course_code text,                         -- materia asignada (manual o derivada)
   due timestamptz,
   url text,
   status text not null default 'pending' check (status in ('pending','done')),
@@ -56,3 +59,11 @@ drop trigger if exists trg_profiles_touch on profiles;
 create trigger trg_profiles_touch
   before update on profiles
   for each row execute function touch_profiles_updated_at();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- MIGRACIÓN para bases ya creadas (no destructiva). Si vas a ejecutar este
+-- archivo completo sobre una base vacía, estas sentencias son redundantes pero
+-- inofensivas. Si ya tienes datos en producción, ejecuta SOLO este bloque.
+alter table profiles add column if not exists term int;
+alter table profiles add column if not exists courses jsonb not null default '[]'::jsonb;
+alter table tasks add column if not exists course_code text;

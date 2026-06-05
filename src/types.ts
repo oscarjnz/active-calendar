@@ -12,10 +12,18 @@ export interface Env {
 export interface IcalEvent {
   uid: string;
   summary: string;
-  course: string | null;
+  course: string | null; // nombre legible del curso si se pudo derivar
+  courseCode: string | null; // código normalizado (ej. "TI3631") si se pudo derivar
+  isSession: boolean; // true = clase/sesión (trae curso), false = tarea/entrega
   due: Date | null;
   url: string | null;
   lastModified: Date | null;
+}
+
+/** Materia matriculada por el estudiante (código + nombre legible). */
+export interface Course {
+  code: string; // normalizado, ej. "TI3631"
+  name: string; // nombre legible, ej. "Proyecto Integrador II"
 }
 
 export interface Profile {
@@ -27,6 +35,8 @@ export interface Profile {
   avatar_url: string | null;
   ical_url: string | null;
   accent: string;
+  term: number | null; // cuatrimestre/semestre actual (1-12)
+  courses: Course[]; // materias seleccionadas + autodescubiertas
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +46,7 @@ export interface TaskRow {
   uid: string;
   summary: string;
   course: string | null;
+  course_code: string | null; // materia asignada (manual o derivada), normalizada
   due: string | null;
   url: string | null;
   status: 'pending' | 'done';

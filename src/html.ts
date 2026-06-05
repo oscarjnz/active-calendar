@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { PENSUM } from './pensum';
 
 /** SPA servida por el Worker. Login con Clerk; datos vía el API del Worker. */
 export function renderApp(env: Env): string {
@@ -6,6 +7,8 @@ export function renderApp(env: Env): string {
     CLERK_PUBLISHABLE_KEY: env.CLERK_PUBLISHABLE_KEY ?? null,
     APP_BASE_URL: env.APP_BASE_URL ?? null,
   });
+  // Pensum completo para el selector de materias (código, nombre, cuatrimestre).
+  const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem]));
 
   return `<!DOCTYPE html>
 <html lang="es" class="h-full">
@@ -14,39 +17,104 @@ export function renderApp(env: Env): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#0a0a0a" />
 <title>Active Calendar</title>
+<script>
+  // Aplica el tema antes de pintar para evitar parpadeo.
+  (function () {
+    try {
+      var t = localStorage.getItem('theme');
+      var dark = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      if (dark) document.documentElement.classList.add('dark');
+    } catch (e) {}
+  })();
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: 'class' };</script>
 <style>
-  :root { color-scheme: light; }
-  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .fade-in { animation: fade .18s ease-out; }
-  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-  .spin { animation: sp 1s linear infinite; }
+  :root {
+    color-scheme: light;
+    /* Curvas de easing con carácter (emil-design): más fuertes que las de CSS. */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  }
+  html.dark { color-scheme: dark; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+  /* Entradas: empiezan desplazadas+escaladas, nunca desde scale(0). */
+  .fade-in { animation: fade .26s var(--ease-out) both; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px) scale(0.99); } to { opacity: 1; transform: none; } }
+
+  /* Stagger sutil para listas de tareas. */
+  .stagger > * { animation: rise .32s var(--ease-out) both; }
+  .stagger > *:nth-child(1){animation-delay:.02s}
+  .stagger > *:nth-child(2){animation-delay:.05s}
+  .stagger > *:nth-child(3){animation-delay:.08s}
+  .stagger > *:nth-child(4){animation-delay:.11s}
+  .stagger > *:nth-child(5){animation-delay:.14s}
+  .stagger > *:nth-child(6){animation-delay:.17s}
+  .stagger > *:nth-child(7){animation-delay:.20s}
+  .stagger > *:nth-child(n+8){animation-delay:.22s}
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .spin { animation: sp .8s linear infinite; }
   @keyframes sp { to { transform: rotate(360deg); } }
+
+  /* Feedback de pulsación: todo lo pulsable responde al toque. */
+  button, .pressable { transition: transform .16s var(--ease-out), background-color .16s ease, border-color .16s ease, box-shadow .16s var(--ease-out); }
+  button:active, .pressable:active { transform: scale(0.97); }
+  .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
+
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 9999px; }
+  html.dark ::-webkit-scrollbar-thumb { background: #404040; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-in, .stagger > *, .spin { animation: none !important; }
+    button, .pressable, .card { transition: none !important; }
+  }
 </style>
 </head>
-<body class="h-full bg-neutral-50 text-neutral-900">
+<body class="h-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
 <div id="root" class="min-h-full"></div>
 
-<script>window.__CFG__ = ${cfg};</script>
+<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum};</script>
 <script type="module">
 import { Clerk } from 'https://esm.sh/@clerk/clerk-js@5';
 
 const cfg = window.__CFG__;
 const root = document.getElementById('root');
 
+// ---------- pensum / materias ----------
+const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem]) => ({ code, name, sem }));
+const PENSUM_BY_CODE = new Map(PENSUM.map(c => [c.code, c]));
+function normCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+// Nombre legible de una materia por código: perfil > pensum > el propio código.
+function courseName(code) {
+  if (!code) return null;
+  const c = normCode(code);
+  const fromProfile = (state.profile?.courses || []).find(x => normCode(x.code) === c);
+  if (fromProfile) return fromProfile.name;
+  return PENSUM_BY_CODE.get(c)?.name || code;
+}
+// Materias del estudiante para los selectores (las del perfil; si no hay, las del cuatrimestre).
+function myCourses() {
+  const cs = state.profile?.courses || [];
+  if (cs.length) return cs.slice().sort((a,b) => a.name.localeCompare(b.name, 'es'));
+  const term = state.profile?.term;
+  if (term) return PENSUM.filter(c => c.sem === term).map(c => ({ code: c.code, name: c.name }));
+  return [];
+}
+
 if (!cfg.CLERK_PUBLISHABLE_KEY) {
   root.innerHTML = '<div class="max-w-lg mx-auto mt-20 bg-amber-50 border border-amber-300 rounded-xl p-6">' +
     '<h1 class="text-xl font-semibold mb-2">Falta configuración</h1>' +
-    '<p class="text-sm text-neutral-700">El Worker no tiene <code class="bg-neutral-200 px-1 rounded">CLERK_PUBLISHABLE_KEY</code>. ' +
+    '<p class="text-sm text-neutral-700 dark:text-neutral-300">El Worker no tiene <code class="bg-neutral-200 px-1 rounded">CLERK_PUBLISHABLE_KEY</code>. ' +
     'Cárgala en Cloudflare (Settings → Variables) y vuelve a desplegar.</p></div>';
   throw new Error('Falta CLERK_PUBLISHABLE_KEY');
 }
 
 // ---------- utilidades ----------
 const ACCENTS = {
-  neutral: { solid: 'bg-neutral-900 hover:bg-neutral-800', text: 'text-neutral-900', soft: 'bg-neutral-100', ring: 'focus:ring-neutral-900', bar: 'bg-neutral-900', dot: 'bg-neutral-900' },
+  neutral: { solid: 'bg-neutral-900 hover:bg-neutral-800', text: 'text-neutral-900', soft: 'bg-neutral-100 dark:bg-neutral-800', ring: 'focus:ring-neutral-900', bar: 'bg-neutral-900', dot: 'bg-neutral-900' },
   indigo:  { solid: 'bg-indigo-600 hover:bg-indigo-700', text: 'text-indigo-700', soft: 'bg-indigo-50', ring: 'focus:ring-indigo-600', bar: 'bg-indigo-600', dot: 'bg-indigo-600' },
   emerald: { solid: 'bg-emerald-600 hover:bg-emerald-700', text: 'text-emerald-700', soft: 'bg-emerald-50', ring: 'focus:ring-emerald-600', bar: 'bg-emerald-600', dot: 'bg-emerald-600' },
   rose:    { solid: 'bg-rose-600 hover:bg-rose-700', text: 'text-rose-700', soft: 'bg-rose-50', ring: 'focus:ring-rose-600', bar: 'bg-rose-600', dot: 'bg-rose-600' },
@@ -62,6 +130,19 @@ function el(html) {
   const t = document.createElement('template');
   t.innerHTML = html.trim();
   return t.content.firstElementChild;
+}
+function setupThemeToggle() {
+  const sun = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const moon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+  const btn = el('<button title="Cambiar tema" class="fixed bottom-4 right-4 z-50 h-10 w-10 rounded-full shadow-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 flex items-center justify-center transition hover:scale-105"></button>');
+  const paint = () => { btn.innerHTML = document.documentElement.classList.contains('dark') ? sun : moon; };
+  btn.addEventListener('click', () => {
+    const dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
+    paint();
+  });
+  paint();
+  document.body.appendChild(btn);
 }
 function fmtDue(iso) {
   if (!iso) return 'Sin fecha';
@@ -111,7 +192,7 @@ function renderLanding() {
       <div class="flex items-center justify-center p-6">
         <div class="w-full max-w-sm">
           <h2 class="text-2xl font-semibold mb-1 md:hidden">Active Calendar</h2>
-          <p class="text-neutral-600 mb-6 md:hidden">Tus tareas de Blackboard en un solo lugar.</p>
+          <p class="text-neutral-600 dark:text-neutral-300 mb-6 md:hidden">Tus tareas de Blackboard en un solo lugar.</p>
           <div id="signin"></div>
         </div>
       </div>
@@ -129,11 +210,11 @@ function renderOnboarding() {
     <div class="fade-in max-w-xl mx-auto px-4 py-10">
       <div id="topbar" class="flex justify-end mb-6"></div>
       <h1 class="text-2xl font-semibold mb-1">Hola, \${esc(state.profile.display_name || '')}</h1>
-      <p class="text-neutral-600 mb-6">Solo falta un paso: conecta tu calendario de Blackboard.</p>
-      <div class="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm space-y-3">
+      <p class="text-neutral-600 dark:text-neutral-300 mb-6">Solo falta un paso: conecta tu calendario de Blackboard.</p>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm space-y-3">
         <label class="block text-sm font-medium">URL iCal de Blackboard</label>
-        <input id="ical" class="w-full border border-neutral-300 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" placeholder="https://…/learn.ics" />
-        <details class="text-sm text-neutral-600">
+        <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" placeholder="https://…/learn.ics" />
+        <details class="text-sm text-neutral-600 dark:text-neutral-300">
           <summary class="cursor-pointer select-none">¿Cómo obtengo mi enlace? (paso a paso)</summary>
           <ol class="list-decimal ml-5 mt-2 space-y-1">
             <li>Entra al portal de Blackboard de tu universidad.</li>
@@ -142,10 +223,10 @@ function renderOnboarding() {
             <li>Genera (o regenera) el enlace y cópialo. Debe terminar en <code>.ics</code>.</li>
             <li>Pégalo aquí arriba.</li>
           </ol>
-          <p class="mt-2 text-neutral-500">El enlace es personal. No lo compartas con nadie.</p>
+          <p class="mt-2 text-neutral-500 dark:text-neutral-400">El enlace es personal. No lo compartas con nadie.</p>
         </details>
         <button id="save" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Guardar y sincronizar</button>
-        <span id="msg" class="ml-2 text-sm text-neutral-500"></span>
+        <span id="msg" class="ml-2 text-sm text-neutral-500 dark:text-neutral-400"></span>
       </div>
     </div>
   \`);
@@ -163,7 +244,9 @@ function renderOnboarding() {
       msg.textContent = 'Sincronizando…';
       const s = await api('/api/sync', { method: 'POST' });
       state.tasks = s.tasks || [];
-      renderApp2();
+      // Tras sincronizar, el perfil puede traer materias autodescubiertas.
+      try { const me = await api('/api/me'); state.profile = me.profile; state.range = me.range; } catch (e2) {}
+      renderCourseSetup();
     } catch (e) { msg.textContent = 'Error: ' + e.message; }
   });
 }
@@ -172,39 +255,152 @@ function mountUserButton(node) {
   clerk.mountUserButton(node, { afterSignOutUrl: cfg.APP_BASE_URL });
 }
 
+// ---------- render: selección de cuatrimestre + materias ----------
+// Devuelve un elemento reutilizable con el selector de cuatrimestre y los chips
+// de materias. \`selected\` es un Map(code -> {code,name}) que se muta in-place.
+function coursePicker(selected, initialTerm) {
+  const a = ac();
+  const wrap = el(\`
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">¿En qué cuatrimestre vas?</label>
+        <select id="termSel" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2">
+          <option value="">Selecciona…</option>
+          \${Array.from({length:12}, (_,i)=> '<option value="'+(i+1)+'"'+(initialTerm===i+1?' selected':'')+'>Cuatrimestre '+(i+1)+'</option>').join('')}
+        </select>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-medium">Tus materias</span>
+          <span id="selCount" class="text-xs text-neutral-500 dark:text-neutral-400"></span>
+        </div>
+        <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Toca para marcar las que estás cursando. Las electivas que detectemos de tu Blackboard ya vienen marcadas.</p>
+        <div id="chips" class="flex flex-wrap gap-2"></div>
+      </div>
+    </div>
+  \`);
+  const chipsBox = wrap.querySelector('#chips');
+  const countEl = wrap.querySelector('#selCount');
+
+  function chipClass(on) {
+    return 'chip pressable px-3 py-1.5 rounded-full text-sm border ' +
+      (on ? (a.solid + ' text-white border-transparent') : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-900 hover:border-neutral-400 dark:hover:border-neutral-600');
+  }
+  function updateCount() {
+    const n = selected.size;
+    countEl.textContent = n ? (n + ' seleccionada' + (n===1?'':'s')) : '';
+  }
+  function drawChips() {
+    chipsBox.innerHTML = '';
+    const term = parseInt(wrap.querySelector('#termSel').value, 10);
+    // Materias candidatas: las del cuatrimestre elegido + las ya seleccionadas.
+    const byCode = new Map();
+    if (term) for (const c of PENSUM.filter(x => x.sem === term)) byCode.set(c.code, { code: c.code, name: c.name });
+    for (const [code, c] of selected) if (!byCode.has(code)) byCode.set(code, c);
+    const list = [...byCode.values()].sort((x,y) => x.name.localeCompare(y.name, 'es'));
+    if (!list.length) {
+      chipsBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Elige tu cuatrimestre para ver las materias.</p>'));
+    }
+    for (const c of list) {
+      const on = selected.has(c.code);
+      const chip = el('<button type="button" class="'+chipClass(on)+'">'+esc(c.name)+'</button>');
+      chip.addEventListener('click', () => {
+        if (selected.has(c.code)) selected.delete(c.code); else selected.set(c.code, c);
+        drawChips(); updateCount();
+      });
+      chipsBox.appendChild(chip);
+    }
+    updateCount();
+  }
+  wrap.querySelector('#termSel').addEventListener('change', drawChips);
+  drawChips();
+  return wrap;
+}
+
+function renderCourseSetup() {
+  root.innerHTML = '';
+  const a = ac();
+  // Prefill con lo autodescubierto del feed.
+  const selected = new Map((state.profile.courses || []).map(c => [normCode(c.code), { code: normCode(c.code), name: c.name }]));
+  const wrap = el(\`
+    <div class="fade-in max-w-xl mx-auto px-4 py-10">
+      <div id="topbar" class="flex justify-end mb-6"></div>
+      <h1 class="text-2xl font-semibold mb-1">Casi listo, \${esc(state.profile.display_name || '')}</h1>
+      <p class="text-neutral-600 dark:text-neutral-300 mb-6">Dinos en qué cuatrimestre vas y qué materias cursas. Así podemos agrupar tus tareas por materia.</p>
+      <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-5 shadow-sm">
+        <div id="pickerSlot"></div>
+        <div class="flex items-center gap-3 mt-6">
+          <button id="save" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Guardar y continuar</button>
+          <button id="skip" class="text-sm text-neutral-500 dark:text-neutral-400 underline">Omitir por ahora</button>
+          <span id="msg" class="text-sm text-neutral-500 dark:text-neutral-400"></span>
+        </div>
+      </div>
+    </div>
+  \`);
+  root.appendChild(wrap);
+  mountUserButton(wrap.querySelector('#topbar'));
+  const picker = coursePicker(selected, state.profile.term || null);
+  wrap.querySelector('#pickerSlot').appendChild(picker);
+
+  wrap.querySelector('#save').addEventListener('click', async () => {
+    const msg = wrap.querySelector('#msg');
+    const term = parseInt(picker.querySelector('#termSel').value, 10) || null;
+    msg.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ term, courses: [...selected.values()] }) });
+      state.profile = r.profile;
+      renderShell();
+    } catch (e) { msg.textContent = 'Error: ' + e.message; }
+  });
+  wrap.querySelector('#skip').addEventListener('click', () => renderShell());
+}
+
 // ---------- render: app principal ----------
 function stats() {
   const total = state.tasks.length;
   const done = state.tasks.filter(t => t.status === 'done').length;
   return { total, done, pending: total - done, pct: total ? Math.round(done / total * 100) : 0 };
 }
+// Nombre de materia mostrado para una tarea: código asignado > nombre crudo del feed > "Sin materia".
+function taskCourseLabel(t) {
+  if (t.course_code) return courseName(t.course_code);
+  if (t.course) return t.course;
+  return null;
+}
 function byCourse() {
   const map = new Map();
   for (const t of state.tasks) {
-    const k = t.course || 'Sin materia';
+    const k = taskCourseLabel(t) || 'Sin materia';
     if (!map.has(k)) map.set(k, []);
     map.get(k).push(t);
   }
-  return [...map.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+  // "Sin materia" siempre al final; el resto alfabético.
+  return [...map.entries()].sort((a,b) => {
+    if (a[0] === 'Sin materia') return 1;
+    if (b[0] === 'Sin materia') return -1;
+    return a[0].localeCompare(b[0], 'es');
+  });
 }
 
 function taskRow(t) {
   const a = ac();
   const done = t.status === 'done';
+  const label = taskCourseLabel(t);
   const row = el(\`
-    <label class="flex items-start gap-3 bg-white border border-neutral-200 rounded-lg p-3 cursor-pointer hover:border-neutral-300 transition">
-      <input type="checkbox" class="mt-0.5 h-4 w-4 accent-neutral-900" \${done ? 'checked' : ''} />
+    <div class="card flex items-start gap-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-3 hover:border-neutral-300 dark:hover:border-neutral-700 hover:shadow-sm">
+      <input type="checkbox" class="chk mt-0.5 h-4 w-4 accent-neutral-900 cursor-pointer shrink-0" \${done ? 'checked' : ''} />
       <div class="flex-1 min-w-0">
-        <div class="text-sm \${done ? 'line-through text-neutral-400' : 'font-medium'}">\${esc(t.summary)}</div>
-        <div class="text-xs text-neutral-500 mt-0.5 flex flex-wrap gap-x-2">
+        <div class="text-sm \${done ? 'line-through text-neutral-400 dark:text-neutral-600' : 'font-medium'}">\${esc(t.summary)}</div>
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>\${esc(fmtDue(t.due))}</span>
-          \${t.course ? '<span class="'+a.text+'">'+esc(t.course)+'</span>' : ''}
-          \${t.url ? '<a class="underline" target="_blank" rel="noopener" href="'+esc(t.url)+'">abrir en Blackboard</a>' : ''}
+          \${label ? '<span class="inline-flex items-center gap-1 '+a.text+'"><span class="inline-block h-1.5 w-1.5 rounded-full '+a.dot+'"></span>'+esc(label)+'</span>' : '<span class="materia-slot"></span>'}
+          \${t.url ? '<a class="underline decoration-dotted hover:decoration-solid" target="_blank" rel="noopener" href="'+esc(t.url)+'">abrir en Blackboard</a>' : ''}
         </div>
       </div>
-    </label>
+    </div>
   \`);
-  row.querySelector('input').addEventListener('change', async (e) => {
+  // Checkbox -> estado.
+  row.querySelector('.chk').addEventListener('change', async (e) => {
     const ns = e.target.checked ? 'done' : 'pending';
     e.target.disabled = true;
     try {
@@ -218,29 +414,72 @@ function taskRow(t) {
       e.target.disabled = false;
     }
   });
+  // Si la tarea no tiene materia, ofrecer un selector para asignarla manualmente.
+  const slot = row.querySelector('.materia-slot');
+  if (slot) {
+    const opts = myCourses();
+    if (opts.length) {
+      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 '+a.ring+'"><option value="">+ Asignar materia</option>'+opts.map(c => '<option value="'+esc(c.code)+'">'+esc(c.name)+'</option>').join('')+'</select>');
+      sel.addEventListener('change', async (e) => {
+        const code = e.target.value;
+        if (!code) return;
+        e.target.disabled = true;
+        try {
+          await api('/api/task', { method: 'POST', body: JSON.stringify({ uid: t.uid, course_code: code }) });
+          const local = state.tasks.find(x => x.uid === t.uid);
+          if (local) local.course_code = code;
+          renderTab();
+        } catch (err) {
+          alert('No se pudo asignar: ' + err.message);
+          e.target.disabled = false;
+        }
+      });
+      slot.replaceWith(sel);
+    } else {
+      slot.remove();
+    }
+  }
   return row;
 }
 
 function renderResumen(node) {
   const a = ac();
   const s = stats();
+  // Sin tareas esta semana -> modo vacaciones.
+  if (s.total === 0) {
+    node.appendChild(el(\`
+      <div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-14">
+        <div class="text-5xl mb-3" aria-hidden="true">🌴</div>
+        <h2 class="text-xl font-semibold">Disfruta tus vacaciones</h2>
+        <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto">No hay tareas para esta semana. Si crees que deberías ver algo, sincroniza de nuevo o revisa tu enlace en Ajustes.</p>
+        <button id="vacSync" class="\${a.solid} text-white text-sm rounded-lg px-4 py-2 mt-6">Sincronizar ahora</button>
+      </div>
+    \`));
+    const vb = node.querySelector('#vacSync');
+    if (vb) vb.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
+      try { const r = await api('/api/sync', { method: 'POST' }); state.tasks = r.tasks || []; renderShell(); }
+      catch (err) { alert('Error: ' + err.message); btn.disabled = false; btn.textContent = old; }
+    });
+    return;
+  }
   const upcoming = state.tasks.filter(t => t.status === 'pending').slice(0, 5);
   node.appendChild(el(\`
     <div class="grid grid-cols-3 gap-3">
-      <div class="bg-white border border-neutral-200 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.pending}</div><div class="text-xs text-neutral-500">Pendientes</div></div>
-      <div class="bg-white border border-neutral-200 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.done}</div><div class="text-xs text-neutral-500">Hechas</div></div>
-      <div class="bg-white border border-neutral-200 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500">Total</div></div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.pending}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Pendientes</div></div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.done}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Hechas</div></div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Total</div></div>
     </div>
   \`));
   node.appendChild(el(\`
-    <div class="bg-white border border-neutral-200 rounded-xl p-4 mt-3">
+    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mt-3">
       <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%</span></div>
-      <div class="h-2 bg-neutral-100 rounded-full overflow-hidden"><div class="\${a.bar} h-full" style="width:\${s.pct}%"></div></div>
+      <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
     </div>
   \`));
-  const up = el('<div class="mt-4"><h3 class="text-sm font-medium mb-2">Próximas pendientes</h3><div class="space-y-2"></div></div>');
+  const up = el('<div class="mt-4"><h3 class="text-sm font-medium mb-2">Próximas pendientes</h3><div class="space-y-2 stagger"></div></div>');
   const list = up.querySelector('div.space-y-2');
-  if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500">Nada pendiente. ¡Bien ahí!</p>'));
+  if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Nada pendiente. ¡Bien ahí!</p>'));
   else upcoming.forEach(t => list.appendChild(taskRow(t)));
   node.appendChild(up);
 }
@@ -248,18 +487,21 @@ function renderResumen(node) {
 function renderMaterias(node) {
   const a = ac();
   const groups = byCourse();
-  if (groups.length === 0) { node.appendChild(el('<p class="text-sm text-neutral-500">No hay tareas esta semana.</p>')); return; }
+  if (groups.length === 0) {
+    node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><div class="text-4xl mb-2" aria-hidden="true">🌴</div><p class="text-sm text-neutral-500 dark:text-neutral-400">No hay tareas esta semana. Disfruta tus vacaciones.</p></div>'));
+    return;
+  }
   for (const [course, tasks] of groups) {
     const done = tasks.filter(t => t.status === 'done').length;
     const pct = Math.round(done / tasks.length * 100);
     const card = el(\`
-      <div class="bg-white border border-neutral-200 rounded-xl p-4 mb-3">
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mb-3">
         <div class="flex items-center justify-between mb-1">
           <h3 class="font-semibold flex items-center gap-2"><span class="inline-block h-2.5 w-2.5 rounded-full \${a.dot}"></span>\${esc(course)}</h3>
-          <span class="text-xs text-neutral-500">\${done}/\${tasks.length}</span>
+          <span class="text-xs text-neutral-500 dark:text-neutral-400">\${done}/\${tasks.length}</span>
         </div>
-        <div class="h-1.5 bg-neutral-100 rounded-full overflow-hidden mb-3"><div class="\${a.bar} h-full" style="width:\${pct}%"></div></div>
-        <div class="space-y-2"></div>
+        <div class="h-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden mb-3"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${pct}%"></div></div>
+        <div class="space-y-2 stagger"></div>
       </div>
     \`);
     const list = card.querySelector('div.space-y-2');
@@ -271,7 +513,7 @@ function renderMaterias(node) {
 function renderTodas(node) {
   const a = ac();
   const chips = el(\`<div class="flex gap-2 mb-3">
-    \${['all','pending','done'].map(f => '<button data-f="'+f+'" class="chip px-3 py-1.5 rounded-full text-sm border '+(state.filter===f?(a.solid+' text-white border-transparent'):'border-neutral-300 text-neutral-700 bg-white')+'">'+({all:'Todas',pending:'Pendientes',done:'Hechas'}[f])+'</button>').join('')}
+    \${['all','pending','done'].map(f => '<button data-f="'+f+'" class="chip px-3 py-1.5 rounded-full text-sm border '+(state.filter===f?(a.solid+' text-white border-transparent'):'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-900')+'">'+({all:'Todas',pending:'Pendientes',done:'Hechas'}[f])+'</button>').join('')}
   </div>\`);
   chips.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { state.filter = b.dataset.f; renderTab(); }));
   node.appendChild(chips);
@@ -279,8 +521,8 @@ function renderTodas(node) {
   let list = state.tasks.slice();
   if (state.filter === 'pending') list = list.filter(t => t.status === 'pending');
   if (state.filter === 'done') list = list.filter(t => t.status === 'done');
-  const box = el('<div class="space-y-2"></div>');
-  if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500">Nada por aquí.</p>'));
+  const box = el('<div class="space-y-2 stagger"></div>');
+  if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Nada por aquí.</p>'));
   else list.forEach(t => box.appendChild(taskRow(t)));
   node.appendChild(box);
 }
@@ -290,29 +532,54 @@ function renderAjustes(node) {
   const p = state.profile;
   const card = el(\`
     <div class="space-y-4">
-      <div class="bg-white border border-neutral-200 rounded-xl p-5 space-y-3">
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <h3 class="font-medium">Perfil</h3>
         <label class="block text-sm">Nombre para mostrar</label>
-        <input id="dn" class="w-full border border-neutral-300 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.display_name||'')}" />
-        <p class="text-xs text-neutral-500">Correo: \${esc(p.email||'—')}</p>
+        <input id="dn" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.display_name||'')}" />
+        <p class="text-xs text-neutral-500 dark:text-neutral-400">Correo: \${esc(p.email||'—')}</p>
       </div>
-      <div class="bg-white border border-neutral-200 rounded-xl p-5 space-y-3">
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <h3 class="font-medium">Calendario de Blackboard</h3>
         <label class="block text-sm">URL iCal</label>
-        <input id="ical" class="w-full border border-neutral-300 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
+        <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
       </div>
-      <div class="bg-white border border-neutral-200 rounded-xl p-5">
+      <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="font-medium">Cuatrimestre y materias</h3>
+          <button id="saveCourses" class="\${a.solid} text-white text-sm rounded-lg px-3 py-1.5">Guardar materias</button>
+        </div>
+        <div id="pickerSlot"></div>
+        <span id="cmsg" class="text-xs text-neutral-500 dark:text-neutral-400"></span>
+      </div>
+      <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5">
         <h3 class="font-medium mb-3">Color de acento</h3>
         <div id="accents" class="flex gap-3"></div>
       </div>
       <div class="flex items-center gap-3">
         <button id="save" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Guardar cambios</button>
-        <button id="resync" class="border border-neutral-300 rounded-lg px-4 py-2">Sincronizar ahora</button>
-        <span id="msg" class="text-sm text-neutral-500"></span>
+        <button id="resync" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-4 py-2">Sincronizar ahora</button>
+        <span id="msg" class="text-sm text-neutral-500 dark:text-neutral-400"></span>
       </div>
     </div>
   \`);
   node.appendChild(card);
+
+  // Selector de cuatrimestre + materias.
+  const selected = new Map((p.courses || []).map(c => [normCode(c.code), { code: normCode(c.code), name: c.name }]));
+  const picker = coursePicker(selected, p.term || null);
+  card.querySelector('#pickerSlot').appendChild(picker);
+  card.querySelector('#saveCourses').addEventListener('click', async (e) => {
+    const cmsg = card.querySelector('#cmsg');
+    const btn = e.currentTarget; btn.disabled = true;
+    cmsg.textContent = 'Guardando…';
+    try {
+      const term = parseInt(picker.querySelector('#termSel').value, 10) || null;
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ term, courses: [...selected.values()] }) });
+      state.profile = r.profile;
+      cmsg.textContent = 'Materias guardadas.';
+      renderTab();
+    } catch (err) { cmsg.textContent = 'Error: ' + err.message; btn.disabled = false; }
+  });
 
   const accents = card.querySelector('#accents');
   Object.keys(ACCENTS).forEach(name => {
@@ -339,7 +606,11 @@ function renderAjustes(node) {
 
   card.querySelector('#resync').addEventListener('click', async (e) => {
     const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
-    try { const s = await api('/api/sync', { method: 'POST' }); state.tasks = s.tasks || []; renderShell(); }
+    try {
+      const s = await api('/api/sync', { method: 'POST' }); state.tasks = s.tasks || [];
+      try { const me = await api('/api/me'); state.profile = me.profile; state.range = me.range; } catch (e2) {}
+      renderShell();
+    }
     catch (err) { alert('Error: ' + err.message); btn.disabled = false; btn.textContent = old; }
   });
 }
@@ -360,7 +631,7 @@ function renderTab() {
   // refrescar estilos de pestañas activas
   document.querySelectorAll('[data-tab]').forEach(b => {
     const on = b.dataset.tab === state.tab;
-    b.className = 'tabbtn px-3 py-2 text-sm rounded-lg ' + (on ? (ac().soft + ' ' + ac().text + ' font-medium') : 'text-neutral-600 hover:bg-neutral-100');
+    b.className = 'tabbtn px-3 py-2 text-sm rounded-lg ' + (on ? (ac().soft + ' ' + ac().text + ' font-medium') : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800');
   });
 }
 
@@ -372,14 +643,14 @@ function renderShell() {
       <header class="flex items-center justify-between gap-3 mb-5">
         <div>
           <h1 class="text-xl font-semibold leading-tight">Hola, \${esc(state.profile.display_name||'')}</h1>
-          <p class="text-xs text-neutral-500">Semana \${esc(rangeText(state.range))}</p>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">Semana \${esc(rangeText(state.range))}</p>
         </div>
         <div class="flex items-center gap-2">
           <button id="syncBtn" class="\${a.solid} text-white text-sm rounded-lg px-3 py-2">Sincronizar</button>
           <div id="userbtn"></div>
         </div>
       </header>
-      <nav class="flex gap-1 mb-4 bg-white border border-neutral-200 rounded-xl p-1 w-full overflow-x-auto">
+      <nav class="flex gap-1 mb-4 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-1 w-full overflow-x-auto">
         \${TABS.map(([k,l]) => '<button data-tab="'+k+'" class="tabbtn px-3 py-2 text-sm rounded-lg whitespace-nowrap">'+l+'</button>').join('')}
       </nav>
       <main id="tabContent"></main>
@@ -390,7 +661,11 @@ function renderShell() {
   shell.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { state.tab = b.dataset.tab; renderTab(); }));
   shell.querySelector('#syncBtn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
-    try { const s = await api('/api/sync', { method: 'POST' }); state.tasks = s.tasks || []; renderTab(); btn.textContent = old; btn.disabled = false; }
+    try {
+      const s = await api('/api/sync', { method: 'POST' }); state.tasks = s.tasks || [];
+      try { const me = await api('/api/me'); state.profile = me.profile; state.range = me.range; } catch (e2) {}
+      renderTab(); btn.textContent = old; btn.disabled = false;
+    }
     catch (err) { alert('Error: ' + err.message); btn.textContent = old; btn.disabled = false; }
   });
   renderTab();
@@ -416,14 +691,30 @@ async function loadAndRender() {
 }
 
 // ---------- arranque ----------
-await clerk.load();
-if (clerk.user) await loadAndRender();
-else renderLanding();
+function fatal(e) {
+  const msg = (e && e.message) ? e.message : String(e);
+  root.innerHTML = '<div class="max-w-lg mx-auto mt-20 px-4">' +
+    '<div class="bg-rose-50 dark:bg-rose-950 border border-rose-300 dark:border-rose-800 rounded-xl p-6">' +
+    '<h1 class="text-lg font-semibold mb-2">No se pudo iniciar la app</h1>' +
+    '<pre class="text-sm whitespace-pre-wrap text-rose-700 dark:text-rose-300">' + esc(msg) + '</pre>' +
+    '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-3">Si dice algo de "production"/"domain", es porque estás usando una clave de Clerk de producción en localhost. Prueba en el dominio real o usa una instancia de desarrollo de Clerk (pk_test_…).</p>' +
+    '</div></div>';
+  console.error(e);
+}
 
-clerk.addListener(({ user }) => {
-  if (user && !state.profile) loadAndRender();
-  else if (!user) renderLanding();
-});
+setupThemeToggle();
+try {
+  await clerk.load();
+  if (clerk.user) await loadAndRender();
+  else renderLanding();
+
+  clerk.addListener(({ user }) => {
+    if (user && !state.profile) loadAndRender();
+    else if (!user) renderLanding();
+  });
+} catch (e) {
+  fatal(e);
+}
 </script>
 </body>
 </html>`;
