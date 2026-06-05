@@ -2,7 +2,8 @@
 // Solo procesa VEVENT y los campos UID, SUMMARY, DTSTART, DTEND, URL,
 // LAST-MODIFIED, CATEGORIES, DESCRIPTION. Maneja line unfolding y escapes.
 
-import type { IcalEvent } from './types';
+import type { Course, IcalEvent } from './types';
+import { normalizeCode, pensumName } from './pensum';
 
 /** Une lineas plegadas (continuacion empieza con espacio o tab). */
 function unfold(raw: string): string[] {
@@ -71,28 +72,68 @@ function splitProp(line: string): { name: string; params: Record<string, string>
   return { name, params, value };
 }
 
-/** Heuristica para extraer el codigo o nombre del curso desde SUMMARY/CATEGORIES/DESCRIPTION. */
-function deriveCourse(summary: string, categories: string | null, description: string | null): string | null {
-  // 1) Texto entre corchetes: "[TI3325] Tarea X"
-  const br = summary.match(/\[([^\]]+)\]/);
-  if (br && br[1]) return br[1].trim();
+/** True si el UID corresponde a una clase/sesión (que SÍ trae el curso). */
+function isSessionUid(uid: string): boolean {
+  return /CalendarEntry/i.test(uid);
+}
 
-  // 2) Codigo tipo dos-cuatro letras + 3-5 digitos al inicio: "TI3325 - ..."
-  const code = summary.match(/^([A-Z]{2,5}\s?\d{3,5})\b/);
-  if (code && code[1]) return code[1].trim();
+/** Extrae el primer código de materia (ej. "TI3712") de un texto, normalizado. */
+export function extractCourseCode(text: string): string | null {
+  const m = text.match(/\b([A-Z]{2,3}\s?-?\s?\d{3,4})\b/i);
+  if (!m || !m[1]) return null;
+  return normalizeCode(m[1]);
+}
 
-  // 3) CATEGORIES suele traer el nombre del curso en Blackboard.
-  if (categories) {
-    const first = categories.split(',')[0]?.trim();
-    if (first) return first;
+/**
+ * Extrae un nombre legible del curso desde el SUMMARY de una sesión de clase.
+ * Ej. "TI3712-02-2025-3: TI3712-02-2025-3-CRIPTOGRAFÍA (ELECTIVA)" -> "Criptografía (Electiva)".
+ * Prefiere el nombre del pensum si el código está catalogado.
+ */
+export function sessionCourseName(summary: string): string | null {
+  const code = extractCourseCode(summary);
+  const fromPensum = code ? pensumName(code) : null;
+  if (fromPensum) return fromPensum;
+
+  // Tomar el texto después del primer ":" (parte descriptiva).
+  let tail = summary.includes(':') ? summary.slice(summary.indexOf(':') + 1) : summary;
+  tail = tail.trim();
+  // Quitar el prefijo "CODE-NN-YYYY-N-" repetido al inicio.
+  tail = tail.replace(/^[A-Z]{2,3}\s?-?\s?\d{3,4}(?:-\d+){0,3}-?/i, '').trim();
+  if (!tail) return null;
+  return toTitleCase(tail);
+}
+
+/** Title Case respetuoso de acentos; deja siglas cortas/paréntesis intactos. */
+function toTitleCase(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\b([a-zà-ÿ])([a-zà-ÿ']*)/gi, (_, a: string, b: string) => a.toUpperCase() + b);
+}
+
+/** Descubre las materias matriculadas a partir de los eventos de tipo sesión/clase. */
+export function collectEnrolledCourses(events: IcalEvent[]): Course[] {
+  const byCode = new Map<string, Course>();
+  for (const ev of events) {
+    if (!ev.isSession || !ev.courseCode) continue;
+    if (byCode.has(ev.courseCode)) continue;
+    const name = ev.course ?? pensumName(ev.courseCode) ?? ev.courseCode;
+    byCode.set(ev.courseCode, { code: ev.courseCode, name });
   }
+  return [...byCode.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
 
-  // 4) Patron "Course: X" en DESCRIPTION.
-  if (description) {
-    const m = description.match(/(?:Course|Curso)\s*:\s*([^\n\r]+)/i);
-    if (m && m[1]) return m[1].trim();
+/**
+ * Deriva el código de materia de una tarea: primero por código en el texto,
+ * luego por coincidencia del nombre de alguna materia matriculada en el SUMMARY.
+ */
+export function deriveCourseCode(summary: string, courses: Course[]): string | null {
+  const direct = extractCourseCode(summary);
+  if (direct) return direct;
+  const hay = summary.toLowerCase();
+  for (const c of courses) {
+    const name = c.name.toLowerCase();
+    if (name.length >= 4 && hay.includes(name)) return c.code;
   }
-
   return null;
 }
 
@@ -121,10 +162,18 @@ export function parseIcal(raw: string): IcalEvent[] {
     if (line === 'END:VEVENT') {
       if (cur.uid && cur.summary) {
         const due = cur.dtend ?? cur.dtstart ?? null;
+        const summary = unescapeText(cur.summary);
+        const isSession = isSessionUid(cur.uid);
+        // Solo las sesiones traen curso confiable en el SUMMARY. Las tareas se
+        // derivan luego contra las materias matriculadas (ver deriveCourseCode).
+        const courseCode = isSession ? extractCourseCode(summary) : null;
+        const course = isSession ? sessionCourseName(summary) : null;
         events.push({
           uid: cur.uid,
-          summary: unescapeText(cur.summary),
-          course: deriveCourse(cur.summary, cur.categories ?? null, cur.description ?? null),
+          summary,
+          course,
+          courseCode,
+          isSession,
           due,
           url: cur.url ?? null,
           lastModified: cur.lastModified ?? null,

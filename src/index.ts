@@ -1,5 +1,5 @@
 import type { Env, Profile } from './types';
-import { filterInRange, parseIcal } from './ical';
+import { collectEnrolledCourses, deriveCourseCode, filterInRange, parseIcal } from './ical';
 import { computeDelta } from './diff';
 import {
   adminClient,
@@ -7,6 +7,9 @@ import {
   getProfile,
   listAllProfilesWithIcal,
   listWeekTasks,
+  mergeCourses,
+  setProfileCourses,
+  setTaskCourse,
   setTaskStatus,
   updateProfile,
   upsertEvents,
@@ -29,8 +32,22 @@ async function syncOne(
   const sb = adminClient(env);
   const raw = await fetchIcal(profile.ical_url);
   const all = parseIcal(raw);
+
+  // 1) Descubrir materias matriculadas desde las sesiones de clase (todo el feed)
+  //    y fusionarlas con las que el estudiante ya tenga en su perfil.
+  const discovered = collectEnrolledCourses(all);
+  const courses = mergeCourses(profile.courses ?? [], discovered);
+  if (discovered.length > 0) {
+    await setProfileCourses(sb, profile.user_id, courses);
+  }
+
+  // 2) Solo las tareas/entregas (no las sesiones) se guardan como tareas.
   const { start, end } = currentWeekRangeSdq();
-  const inWeek = filterInRange(all, start, end);
+  const inWeek = filterInRange(all, start, end).filter((ev) => !ev.isSession);
+  // Derivar la materia de cada tarea contra las materias matriculadas.
+  for (const ev of inWeek) {
+    if (!ev.courseCode) ev.courseCode = deriveCourseCode(ev.summary, courses);
+  }
 
   const existingRows = await listWeekTasks(sb, profile.user_id, start, end);
   const existing = new Map(existingRows.map((r) => [r.uid, r]));
@@ -117,6 +134,8 @@ export default {
           display_name?: string | null;
           ical_url?: string | null;
           accent?: string;
+          term?: number | null;
+          courses?: { code: string; name: string }[];
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });
@@ -129,11 +148,21 @@ export default {
       const u = await requireUser(req, env);
       if (u instanceof Response) return u;
       try {
-        const body = (await req.json()) as { uid?: string; status?: 'pending' | 'done' };
-        if (!body.uid || (body.status !== 'pending' && body.status !== 'done')) {
+        const body = (await req.json()) as {
+          uid?: string;
+          status?: 'pending' | 'done';
+          course_code?: string | null;
+        };
+        if (!body.uid) return json({ error: 'bad request' }, { status: 400 });
+        // Asignación de materia (puede venir sola o junto al status).
+        if ('course_code' in body) {
+          await setTaskCourse(sb, u, body.uid, body.course_code ?? null);
+        }
+        if (body.status === 'pending' || body.status === 'done') {
+          await setTaskStatus(sb, u, body.uid, body.status);
+        } else if (!('course_code' in body)) {
           return json({ error: 'bad request' }, { status: 400 });
         }
-        await setTaskStatus(sb, u, body.uid, body.status);
         return json({ ok: true });
       } catch (err) {
         return json({ error: (err as Error).message }, { status: 400 });
