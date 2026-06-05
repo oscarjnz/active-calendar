@@ -73,11 +73,13 @@ export async function updateProfile(
     accent?: string;
     term?: number | null;
     courses?: Course[];
+    email_notify?: boolean;
   },
 ): Promise<Profile> {
   const patch: Record<string, unknown> = {};
   if ('display_name' in fields) patch.display_name = fields.display_name?.trim() || null;
   if ('ical_url' in fields) patch.ical_url = fields.ical_url?.trim() || null;
+  if ('email_notify' in fields) patch.email_notify = !!fields.email_notify;
   if ('accent' in fields && fields.accent) {
     patch.accent = (VALID_ACCENTS as readonly string[]).includes(fields.accent)
       ? fields.accent
@@ -190,6 +192,15 @@ export function mergeCourses(existing: Course[], discovered: Course[]): Course[]
   for (const c of discovered) byCode.set(c.code, c);
   for (const c of existing) byCode.set(c.code, c); // las del perfil tienen prioridad
   return [...byCode.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/** Marca que se le acaba de enviar el correo (anti-duplicados en el cron). */
+export async function markEmailed(sb: SupabaseClient, userId: string): Promise<void> {
+  const { error } = await sb
+    .from('profiles')
+    .update({ last_emailed: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (error) throw new Error(`profiles.markEmailed: ${error.message}`);
 }
 
 /** Persiste la lista de materias del perfil (sin tocar otros campos). */

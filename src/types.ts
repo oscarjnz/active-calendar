@@ -7,6 +7,9 @@ export interface Env {
   CLERK_SECRET_KEY: string; // sk_... -> secreta, verifica tokens y consulta usuarios
   // URL publica del propio Worker.
   APP_BASE_URL: string;
+  // Resend (correo). RESEND_API_KEY es secreta; RESEND_FROM es opcional.
+  RESEND_API_KEY: string; // re_... -> secreta, autentica el envío de correos
+  RESEND_FROM?: string; // remitente, ej. "Active Calendar <recordatorios@activecalendar.site>"
 }
 
 export interface IcalEvent {
@@ -37,6 +40,8 @@ export interface Profile {
   accent: string;
   term: number | null; // cuatrimestre/semestre actual (1-12)
   courses: Course[]; // materias seleccionadas + autodescubiertas
+  email_notify: boolean; // recibir el recordatorio diario por correo
+  last_emailed: string | null; // ISO del último correo enviado (anti-duplicados)
   created_at: string;
   updated_at: string;
 }
