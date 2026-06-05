@@ -74,12 +74,18 @@ export async function updateProfile(
     term?: number | null;
     courses?: Course[];
     email_notify?: boolean;
+    notify_time?: string;
   },
 ): Promise<Profile> {
   const patch: Record<string, unknown> = {};
   if ('display_name' in fields) patch.display_name = fields.display_name?.trim() || null;
   if ('ical_url' in fields) patch.ical_url = fields.ical_url?.trim() || null;
   if ('email_notify' in fields) patch.email_notify = !!fields.email_notify;
+  if ('notify_time' in fields) {
+    const t = (fields.notify_time ?? '').trim();
+    // Solo HH:MM 24h válido; si no, caemos al default 07:00.
+    patch.notify_time = /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : '07:00';
+  }
   if ('accent' in fields && fields.accent) {
     patch.accent = (VALID_ACCENTS as readonly string[]).includes(fields.accent)
       ? fields.accent

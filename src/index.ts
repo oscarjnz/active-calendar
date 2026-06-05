@@ -16,7 +16,7 @@ import {
   upsertEvents,
 } from './supabase';
 import { getAuthUserId } from './clerk';
-import { currentAcademicWeek, currentWeekRangeSdq, isMorningWindowSdq, toSdqParts } from './time';
+import { currentAcademicWeek, currentWeekRangeSdq, toSdqParts } from './time';
 import { sendWeeklyEmail } from './email';
 import { renderApp } from './html';
 
@@ -74,17 +74,29 @@ function sameSdqDay(a: Date, b: Date): boolean {
   return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;
 }
 
+/** True si ya pasó la hora local SDQ ("HH:MM") que el usuario eligió para hoy. */
+function notifyTimeReached(notifyTime: string | null, now: Date): boolean {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec((notifyTime ?? '07:00').trim());
+  const h = m ? parseInt(m[1]!, 10) : 7;
+  const min = m ? parseInt(m[2]!, 10) : 0;
+  const p = toSdqParts(now);
+  return p.hour * 60 + p.minute >= h * 60 + min;
+}
+
 /**
  * Envía el recordatorio diario por correo si corresponde: el usuario lo quiere,
- * tiene correo, hay pendientes y no se le ha enviado hoy. Silencioso si no aplica.
+ * tiene correo, ya pasó SU hora elegida, hay pendientes y no se le ha enviado hoy.
+ * Silencioso si no aplica.
  */
 async function maybeEmail(
   env: Env,
   sb: ReturnType<typeof adminClient>,
   profile: Profile,
+  now: Date,
 ): Promise<void> {
   if (!env.RESEND_API_KEY || !profile.email || !profile.email_notify) return;
-  if (profile.last_emailed && sameSdqDay(new Date(profile.last_emailed), new Date())) return;
+  if (profile.last_emailed && sameSdqDay(new Date(profile.last_emailed), now)) return;
+  if (!notifyTimeReached(profile.notify_time, now)) return;
   const { start, end } = currentWeekRangeSdq();
   const tasks = await listWeekTasks(sb, profile.user_id, start, end);
   const pending = tasks.filter((t) => t.status === 'pending');
@@ -107,31 +119,35 @@ async function requireUser(req: Request, env: Env): Promise<string | Response> {
 }
 
 export default {
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       (async () => {
         try {
           const sb = adminClient(env);
           const profiles = await listAllProfilesWithIcal(sb);
-          // El recordatorio por correo solo se manda en la corrida matutina (~7 AM
-          // SDQ), así cada usuario recibe a lo sumo un correo al día.
-          const morning = isMorningWindowSdq();
+          const now = new Date();
+          // El iCal se sincroniza solo en las corridas "pesadas" (3/día). El
+          // chequeo de correo corre en cada tick (cada 30 min) para respetar la
+          // hora personalizada de cada usuario; el guard de "ya enviado hoy" evita
+          // duplicados.
+          const SYNC_CRONS = ['0 11 * * *', '0 15 * * *', '0 23 * * *'];
+          const doSync = SYNC_CRONS.includes(event.cron);
           const concurrency = 5;
           let i = 0;
           const worker = async (): Promise<void> => {
             while (i < profiles.length) {
               const p = profiles[i++]!;
-              try {
-                await syncOne(env, p);
-              } catch (err) {
-                console.error(`sync user ${p.user_id}:`, (err as Error).message);
-              }
-              if (morning) {
+              if (doSync) {
                 try {
-                  await maybeEmail(env, sb, p);
+                  await syncOne(env, p);
                 } catch (err) {
-                  console.error(`email user ${p.user_id}:`, (err as Error).message);
+                  console.error(`sync user ${p.user_id}:`, (err as Error).message);
                 }
+              }
+              try {
+                await maybeEmail(env, sb, p, now);
+              } catch (err) {
+                console.error(`email user ${p.user_id}:`, (err as Error).message);
               }
             }
           };
@@ -190,6 +206,7 @@ export default {
           term?: number | null;
           courses?: { code: string; name: string }[];
           email_notify?: boolean;
+          notify_time?: string;
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });
@@ -220,6 +237,28 @@ export default {
         return json({ ok: true });
       } catch (err) {
         return json({ error: (err as Error).message }, { status: 400 });
+      }
+    }
+
+    if (path === '/api/test-email' && req.method === 'POST') {
+      const u = await requireUser(req, env);
+      if (u instanceof Response) return u;
+      try {
+        if (!env.RESEND_API_KEY) {
+          return json({ error: 'RESEND_API_KEY no está configurada en el Worker' }, { status: 400 });
+        }
+        const profile = await getProfile(sb, u);
+        if (!profile || !profile.email) {
+          return json({ error: 'tu perfil no tiene un correo asociado' }, { status: 400 });
+        }
+        const { start, end } = currentWeekRangeSdq();
+        const tasks = await listWeekTasks(sb, u, start, end);
+        const pending = tasks.filter((t) => t.status === 'pending');
+        // Es una prueba: se envía aunque no haya pendientes para ver el formato.
+        await sendWeeklyEmail(env, profile, pending, currentAcademicWeek());
+        return json({ ok: true, sent_to: profile.email, pending: pending.length });
+      } catch (err) {
+        return json({ error: (err as Error).message }, { status: 502 });
       }
     }
 

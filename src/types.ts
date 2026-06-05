@@ -41,6 +41,7 @@ export interface Profile {
   term: number | null; // cuatrimestre/semestre actual (1-12)
   courses: Course[]; // materias seleccionadas + autodescubiertas
   email_notify: boolean; // recibir el recordatorio diario por correo
+  notify_time: string; // hora local SDQ "HH:MM" elegida por el usuario para el envío
   last_emailed: string | null; // ISO del último correo enviado (anti-duplicados)
   created_at: string;
   updated_at: string;

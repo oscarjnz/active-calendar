@@ -3,10 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron triggers en UTC equivalentes a 07:00, 11:00 y 19:00 hora Santo Domingo (UTC-4).
-# Itera todos los usuarios con ical_url y refresca sus tareas de la semana.
+# Cron triggers (UTC). Los 3 "0 11/15/23" = 07:00/11:00/19:00 SDQ: sincronizan el
+# iCal de todos los usuarios. El "*/30" corre cada 30 min y solo despacha los
+# recordatorios por correo a la hora personalizada de cada quien (resolución 30 min).
 [triggers]
-crons = ["0 11 * * *", "0 15 * * *", "0 23 * * *"]
+crons = ["0 11 * * *", "0 15 * * *", "0 23 * * *", "*/30 * * * *"]
 
 # Variables NO secretas (se versionan aquí). APP_BASE_URL = URL real del Worker.
 # CLERK_PUBLISHABLE_KEY (pk_...) es PÚBLICA: pégala aquí (acaba incrustada en el HTML
