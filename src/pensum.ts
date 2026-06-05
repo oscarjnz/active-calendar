@@ -9,10 +9,11 @@ export interface PensumCourse {
   name: string;
   sem: number; // semestre/cuatrimestre sugerido (1-12)
   elective?: boolean; // true = electiva (no es materia obligatoria del cuatrimestre)
+  concentration?: string; // etiqueta de la concentración (solo electivas)
 }
 
 // Nombres en Title Case para una UI más cuidada.
-const RAW: Array<[string, string, number, boolean?]> = [
+const RAW: Array<[string, string, number, boolean?, string?]> = [
   // Semestre 1
   ['EGC153', 'Pre-Cálculo', 1],
   ['EGC160', 'Química General I', 1],
@@ -86,18 +87,12 @@ const RAW: Array<[string, string, number, boolean?]> = [
   ['TI3325', 'Diseño y Planificación de Redes', 9],
   ['TI3326', 'Sistemas Operativos', 9],
   ['TI3631', 'Proyecto Integrador II', 9],
-  ['TI3700', 'Electiva', 9, true],
-  ['TI3710', 'Electiva', 9, true],
   // Semestre 10
   ['TI3410', 'Ingeniería de Factores Humanos', 10],
   ['TI3420', 'Infraestructura Tecnológica', 10],
   ['TI3430', 'Administración de Riesgos y Controles de TI', 10],
-  ['TI3500', 'Electiva Profesional', 10, true],
-  ['TI3510', 'Electiva Profesional', 10, true],
   // Semestre 11
   ['AD8220', 'Taller de Creatividad e Innovación para los Negocios', 11],
-  ['TI3520', 'Electiva Profesional', 11, true],
-  ['TI3530', 'Electiva Profesional', 11, true],
   ['TI3610', 'Pasantía', 11],
   ['TI3620', 'Proyecto Final I', 11],
   ['UNB201', 'Ética', 11],
@@ -106,17 +101,34 @@ const RAW: Array<[string, string, number, boolean?]> = [
   ['TI3432', 'Gestión de Proyectos de TI', 12],
   ['TI3433', 'Auditoría de TI', 12],
   ['TI3621', 'Proyecto Final II', 12],
-  // Electivas profesionales con nombre conocido. No están atadas a un solo
-  // cuatrimestre (cualquiera con cupo de electiva puede tomarlas); se les pone
-  // sem 9 porque ahí abren los slots de electiva del pensum. Se marcan como
-  // electivas para agruparlas aparte en el selector.
-  ['TI3701', 'Desarrollo de Aplicaciones de Dispositivos Móviles', 9, true],
-  ['TI3702', 'Malware y Vulnerabilidades', 9, true],
-  ['TI3711', 'Programación Paralela y Distribuida', 9, true],
-  ['TI3712', 'Criptografía', 9, true],
+  // ─── Electivas por concentración (pensum TI3, periodo 2026-3) ───
+  // No están atadas a un solo cuatrimestre: se agrupan por concentración en el
+  // selector. El sem es el sugerido por el pensum; se marcan elective:true.
+  // Concentración: Gestión de Software
+  ['TI3701', 'Desarrollo de Aplicaciones de Dispositivos Móviles', 9, true, 'Gestión de Software'],
+  ['TI3711', 'Programación Paralela y Distribuida', 9, true, 'Gestión de Software'],
+  ['TI3501', 'Tendencias en Desarrollo de Software', 10, true, 'Gestión de Software'],
+  ['TI3511', 'Inteligencia en Ciencia de Datos', 10, true, 'Gestión de Software'],
+  ['TI3521', 'Ingeniería de Software en Tiempo Real', 11, true, 'Gestión de Software'],
+  ['TI3531', 'Seguridad en Sistemas de Desarrollo de Software', 11, true, 'Gestión de Software'],
+  // Concentración: Gestión de Ciberseguridad
+  ['TI3702', 'Malware y Vulnerabilidades', 9, true, 'Gestión de Ciberseguridad'],
+  ['TI3712', 'Criptografía', 9, true, 'Gestión de Ciberseguridad'],
+  ['TI3502', 'Gestión Estratégica de Ciberseguridad', 10, true, 'Gestión de Ciberseguridad'],
+  ['TI3512', 'Ethical Hacking', 10, true, 'Gestión de Ciberseguridad'],
+  ['TI3522', 'Recuperación de Desastres y Manejo de Incidentes', 11, true, 'Gestión de Ciberseguridad'],
+  ['TI3532', 'Análisis Forense', 11, true, 'Gestión de Ciberseguridad'],
+  // Concentración en Emprendimiento (abierta a todas las carreras)
+  ['UNBE01', 'Pensamiento y Acción Emprendedora', 9, true, 'Emprendimiento'],
+  ['UNBE02', 'Taller de Creatividad e Innovación para los Negocios', 9, true, 'Emprendimiento'],
+  ['UNB303', 'Emprendimiento para la Creación de Nuevos Negocios', 9, true, 'Emprendimiento'],
+  ['UNB304', 'Gestión de Nuevos Negocios (Startups)', 9, true, 'Emprendimiento'],
+  ['UNB305', 'Intraemprendimiento (Emprendimiento Corporativo)', 9, true, 'Emprendimiento'],
+  // Electiva profesional común con otras carreras
+  ['IC4525', 'Seminario de Preparación al CAPM-PMI', 9, true, 'Electiva profesional'],
 ];
 
-export const PENSUM: PensumCourse[] = RAW.map(([code, name, sem, elective]) => ({ code, name, sem, elective: elective ?? false }));
+export const PENSUM: PensumCourse[] = RAW.map(([code, name, sem, elective, concentration]) => ({ code, name, sem, elective: elective ?? false, concentration: concentration ?? '' }));
 
 const BY_CODE = new Map<string, PensumCourse>(PENSUM.map((c) => [c.code, c]));
 
