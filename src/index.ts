@@ -18,6 +18,15 @@ import { getAuthUserId } from './clerk';
 import { currentWeekRangeSdq } from './time';
 import { renderApp } from './html';
 
+// Logo / favicon: marca minimalista (calendario + check) en SVG. Se sirve como
+// archivo y también se reutiliza incrustado en el HTML (ver html.ts).
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<rect width="32" height="32" rx="8" fill="#0a0a0a"/>
+<path d="M11 7.5v3M21 7.5v3" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+<rect x="7" y="9.5" width="18" height="15" rx="3.2" fill="none" stroke="#fff" stroke-width="2"/>
+<path d="M11.5 17.5l3 3 6-6.5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
 async function fetchIcal(url: string): Promise<string> {
   const res = await fetch(url, { cf: { cacheTtl: 0 } });
   if (!res.ok) throw new Error(`ical fetch ${res.status}`);
@@ -100,6 +109,13 @@ export default {
   async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    // Favicon / icono (SVG). Lo piden el navegador y el <link> del HTML.
+    if (req.method === 'GET' && (path === '/favicon.svg' || path === '/favicon.ico' || path === '/icon.svg')) {
+      return new Response(FAVICON_SVG, {
+        headers: { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' },
+      });
+    }
 
     // SPA.
     if (req.method === 'GET' && !path.startsWith('/api/')) {

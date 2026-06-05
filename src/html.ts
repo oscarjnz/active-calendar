@@ -1,5 +1,6 @@
 import type { Env } from './types';
 import { PENSUM } from './pensum';
+import { currentAcademicWeek } from './time';
 
 /** SPA servida por el Worker. Login con Clerk; datos vía el API del Worker. */
 export function renderApp(env: Env): string {
@@ -7,8 +8,10 @@ export function renderApp(env: Env): string {
     CLERK_PUBLISHABLE_KEY: env.CLERK_PUBLISHABLE_KEY ?? null,
     APP_BASE_URL: env.APP_BASE_URL ?? null,
   });
-  // Pensum completo para el selector de materias (código, nombre, cuatrimestre).
-  const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem]));
+  // Pensum completo para el selector de materias (código, nombre, cuatrimestre, electiva).
+  const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem, c.elective ? 1 : 0]));
+  // Semana académica (bloque + 1-15) calculada server-side con la fecha actual.
+  const week = JSON.stringify(currentAcademicWeek());
 
   return `<!DOCTYPE html>
 <html lang="es" class="h-full">
@@ -16,6 +19,8 @@ export function renderApp(env: Env): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#0a0a0a" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/favicon.svg" />
 <title>Active Calendar</title>
 <script>
   // Aplica el tema antes de pintar para evitar parpadeo.
@@ -76,7 +81,7 @@ export function renderApp(env: Env): string {
 <body class="h-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
 <div id="root" class="min-h-full"></div>
 
-<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum};</script>
+<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week};</script>
 <script type="module">
 import { Clerk } from 'https://esm.sh/@clerk/clerk-js@5';
 
@@ -84,8 +89,9 @@ const cfg = window.__CFG__;
 const root = document.getElementById('root');
 
 // ---------- pensum / materias ----------
-const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem]) => ({ code, name, sem }));
+const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem, elective]) => ({ code, name, sem, elective: !!elective }));
 const PENSUM_BY_CODE = new Map(PENSUM.map(c => [c.code, c]));
+const WEEK = window.__WEEK__ || null;
 function normCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 // Nombre legible de una materia por código: perfil > pensum > el propio código.
 function courseName(code) {
@@ -94,6 +100,11 @@ function courseName(code) {
   const fromProfile = (state.profile?.courses || []).find(x => normCode(x.code) === c);
   if (fromProfile) return fromProfile.name;
   return PENSUM_BY_CODE.get(c)?.name || code;
+}
+// Formato de materia para mostrar: "CÓDIGO · NOMBRE EN MAYÚSCULAS".
+function fmtCourse(code, name) {
+  const nm = String(name || '').toUpperCase();
+  return code ? (normCode(code) + ' · ' + nm) : nm;
 }
 // Materias del estudiante para los selectores (las del perfil; si no hay, las del cuatrimestre).
 function myCourses() {
@@ -130,6 +141,16 @@ function el(html) {
   const t = document.createElement('template');
   t.innerHTML = html.trim();
   return t.content.firstElementChild;
+}
+// Marca minimalista (calendario + check). Usa currentColor para adaptarse al tema.
+function logoMark(cls) {
+  return '<svg viewBox="0 0 32 32" class="'+(cls||'h-7 w-7')+'" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+
+    '<path d="M11 4.5v3.5M21 4.5v3.5"/>'+
+    '<rect x="6.5" y="7" width="19" height="17" rx="3.6"/>'+
+    '<path d="M11.5 16l3 3 6.5-7"/></svg>';
+}
+function brand(cls) {
+  return '<span class="inline-flex items-center gap-2 '+(cls||'')+'">'+logoMark('h-6 w-6')+'<span class="font-semibold tracking-tight">Active Calendar</span></span>';
 }
 function setupThemeToggle() {
   const sun = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
@@ -180,7 +201,7 @@ function renderLanding() {
   const wrap = el(\`
     <div class="fade-in min-h-screen grid md:grid-cols-2">
       <div class="hidden md:flex flex-col justify-center px-12 bg-neutral-900 text-white">
-        <h1 class="text-4xl font-semibold tracking-tight">Active Calendar</h1>
+        <div class="flex items-center gap-3">\${logoMark('h-9 w-9')}<h1 class="text-4xl font-semibold tracking-tight">Active Calendar</h1></div>
         <p class="mt-4 text-neutral-300 max-w-sm">Todas tus tareas de Blackboard de la semana, organizadas por materia, en una sola vista. Sin instalar nada.</p>
         <ul class="mt-8 space-y-2 text-sm text-neutral-400">
           <li>· Resumen de progreso de la semana</li>
@@ -191,7 +212,7 @@ function renderLanding() {
       </div>
       <div class="flex items-center justify-center p-6">
         <div class="w-full max-w-sm">
-          <h2 class="text-2xl font-semibold mb-1 md:hidden">Active Calendar</h2>
+          <div class="md:hidden mb-1 text-xl">\${brand()}</div>
           <p class="text-neutral-600 dark:text-neutral-300 mb-6 md:hidden">Tus tareas de Blackboard en un solo lugar.</p>
           <div id="signin"></div>
         </div>
@@ -260,6 +281,13 @@ function mountUserButton(node) {
 // de materias. \`selected\` es un Map(code -> {code,name}) que se muta in-place.
 function coursePicker(selected, initialTerm) {
   const a = ac();
+  // Si el estudiante ya tiene seleccionadas materias de otro cuatrimestre o
+  // electivas, abrimos la sección avanzada de entrada.
+  let showMore = false;
+  for (const [code] of selected) {
+    const p = PENSUM_BY_CODE.get(code);
+    if (p && (p.elective || (initialTerm && p.sem !== initialTerm))) { showMore = true; break; }
+  }
   const wrap = el(\`
     <div class="space-y-4">
       <div>
@@ -277,10 +305,33 @@ function coursePicker(selected, initialTerm) {
         <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Toca para marcar las que estás cursando. Las electivas que detectemos de tu Blackboard ya vienen marcadas.</p>
         <div id="chips" class="flex flex-wrap gap-2"></div>
       </div>
+      <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+        <input id="moreToggle" type="checkbox" class="\${a.text} rounded border-neutral-300 dark:border-neutral-600 focus:ring-0" \${showMore?'checked':''} />
+        <span>Estoy fuera de bloque o tomo electivas / materias de otros cuatrimestres</span>
+      </label>
+      <div id="moreBox" class="space-y-4 \${showMore?'':'hidden'}">
+        <div>
+          <span class="text-sm font-medium">Electivas</span>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Marca las electivas que estás cursando.</p>
+          <div id="elecChips" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Materias de otro cuatrimestre</label>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Si llevas materias adelantadas o atrasadas, elige el cuatrimestre para verlas.</p>
+          <select id="otherTerm" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
+            <option value="">Selecciona un cuatrimestre…</option>
+            \${Array.from({length:12}, (_,i)=> '<option value="'+(i+1)+'">Cuatrimestre '+(i+1)+'</option>').join('')}
+          </select>
+          <div id="otherChips" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
     </div>
   \`);
   const chipsBox = wrap.querySelector('#chips');
+  const elecBox = wrap.querySelector('#elecChips');
+  const otherBox = wrap.querySelector('#otherChips');
   const countEl = wrap.querySelector('#selCount');
+  const moreBox = wrap.querySelector('#moreBox');
 
   function chipClass(on) {
     return 'chip pressable px-3 py-1.5 rounded-full text-sm border ' +
@@ -290,30 +341,49 @@ function coursePicker(selected, initialTerm) {
     const n = selected.size;
     countEl.textContent = n ? (n + ' seleccionada' + (n===1?'':'s')) : '';
   }
-  function drawChips() {
+  function makeChip(c, redraw) {
+    const on = selected.has(c.code);
+    const chip = el('<button type="button" class="'+chipClass(on)+'">'+esc(fmtCourse(c.code, c.name))+'</button>');
+    chip.addEventListener('click', () => {
+      if (selected.has(c.code)) selected.delete(c.code); else selected.set(c.code, c);
+      redraw(); updateCount();
+    });
+    return chip;
+  }
+  function drawCore() {
     chipsBox.innerHTML = '';
     const term = parseInt(wrap.querySelector('#termSel').value, 10);
-    // Materias candidatas: las del cuatrimestre elegido + las ya seleccionadas.
+    // Núcleo del cuatrimestre (no electivas) + las ya seleccionadas de ese término.
     const byCode = new Map();
-    if (term) for (const c of PENSUM.filter(x => x.sem === term)) byCode.set(c.code, { code: c.code, name: c.name });
-    for (const [code, c] of selected) if (!byCode.has(code)) byCode.set(code, c);
+    if (term) for (const c of PENSUM.filter(x => x.sem === term && !x.elective)) byCode.set(c.code, { code: c.code, name: c.name });
+    for (const [code, c] of selected) {
+      const p = PENSUM_BY_CODE.get(code);
+      if (!byCode.has(code) && (!p || (!p.elective && (!term || p.sem === term)))) byCode.set(code, c);
+    }
     const list = [...byCode.values()].sort((x,y) => x.name.localeCompare(y.name, 'es'));
-    if (!list.length) {
-      chipsBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Elige tu cuatrimestre para ver las materias.</p>'));
-    }
-    for (const c of list) {
-      const on = selected.has(c.code);
-      const chip = el('<button type="button" class="'+chipClass(on)+'">'+esc(c.name)+'</button>');
-      chip.addEventListener('click', () => {
-        if (selected.has(c.code)) selected.delete(c.code); else selected.set(c.code, c);
-        drawChips(); updateCount();
-      });
-      chipsBox.appendChild(chip);
-    }
-    updateCount();
+    if (!list.length) chipsBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Elige tu cuatrimestre para ver las materias.</p>'));
+    for (const c of list) chipsBox.appendChild(makeChip(c, drawAll));
   }
-  wrap.querySelector('#termSel').addEventListener('change', drawChips);
-  drawChips();
+  function drawElectives() {
+    elecBox.innerHTML = '';
+    const list = PENSUM.filter(x => x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
+    for (const c of list) elecBox.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
+  }
+  function drawOther() {
+    otherBox.innerHTML = '';
+    const term = parseInt(wrap.querySelector('#otherTerm').value, 10);
+    if (!term) return;
+    const list = PENSUM.filter(x => x.sem === term && !x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
+    for (const c of list) otherBox.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
+  }
+  function drawAll() { drawCore(); drawElectives(); drawOther(); updateCount(); }
+
+  wrap.querySelector('#termSel').addEventListener('change', drawAll);
+  wrap.querySelector('#otherTerm').addEventListener('change', drawOther);
+  wrap.querySelector('#moreToggle').addEventListener('change', (e) => {
+    moreBox.classList.toggle('hidden', !e.currentTarget.checked);
+  });
+  drawAll();
   return wrap;
 }
 
@@ -361,24 +431,33 @@ function stats() {
   const done = state.tasks.filter(t => t.status === 'done').length;
   return { total, done, pending: total - done, pct: total ? Math.round(done / total * 100) : 0 };
 }
-// Nombre de materia mostrado para una tarea: código asignado > nombre crudo del feed > "Sin materia".
-function taskCourseLabel(t) {
-  if (t.course_code) return courseName(t.course_code);
-  if (t.course) return t.course;
+// Materia de una tarea como {code,name}, o null si no tiene.
+function taskCourse(t) {
+  if (t.course_code) return { code: normCode(t.course_code), name: courseName(t.course_code) };
+  if (t.course) return { code: null, name: t.course };
   return null;
 }
+// Etiqueta lista para mostrar (CÓDIGO · NOMBRE), o null.
+function taskCourseLabel(t) {
+  const c = taskCourse(t);
+  return c ? fmtCourse(c.code, c.name) : null;
+}
+// Agrupa tareas por materia. Devuelve [{code,name,label,tasks}], "Sin materia" al final.
 function byCourse() {
   const map = new Map();
   for (const t of state.tasks) {
-    const k = taskCourseLabel(t) || 'Sin materia';
-    if (!map.has(k)) map.set(k, []);
-    map.get(k).push(t);
+    const c = taskCourse(t);
+    const key = c ? (c.code || c.name) : '__none__';
+    if (!map.has(key)) {
+      map.set(key, c ? { code: c.code, name: c.name, label: fmtCourse(c.code, c.name), tasks: [] }
+                     : { code: null, name: 'Sin materia', label: 'SIN MATERIA', tasks: [] });
+    }
+    map.get(key).tasks.push(t);
   }
-  // "Sin materia" siempre al final; el resto alfabético.
-  return [...map.entries()].sort((a,b) => {
-    if (a[0] === 'Sin materia') return 1;
-    if (b[0] === 'Sin materia') return -1;
-    return a[0].localeCompare(b[0], 'es');
+  return [...map.values()].sort((a,b) => {
+    if (a.name === 'Sin materia') return 1;
+    if (b.name === 'Sin materia') return -1;
+    return a.name.localeCompare(b.name, 'es');
   });
 }
 
@@ -419,7 +498,7 @@ function taskRow(t) {
   if (slot) {
     const opts = myCourses();
     if (opts.length) {
-      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 '+a.ring+'"><option value="">+ Asignar materia</option>'+opts.map(c => '<option value="'+esc(c.code)+'">'+esc(c.name)+'</option>').join('')+'</select>');
+      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 '+a.ring+'"><option value="">+ Asignar materia</option>'+opts.map(c => '<option value="'+esc(c.code)+'">'+esc(fmtCourse(c.code, c.name))+'</option>').join('')+'</select>');
       sel.addEventListener('change', async (e) => {
         const code = e.target.value;
         if (!code) return;
@@ -442,9 +521,22 @@ function taskRow(t) {
   return row;
 }
 
+function weekBadge() {
+  if (!WEEK) return null;
+  const a = ac();
+  const label = WEEK.week
+    ? 'Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel
+    : 'En receso · ' + WEEK.blockLabel;
+  const dot = WEEK.week ? a.bar : 'bg-neutral-400 dark:bg-neutral-600';
+  return el('<div class="fade-in flex items-center gap-2 text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-3">'+
+    '<span class="inline-block h-1.5 w-1.5 rounded-full '+dot+'"></span>'+esc(label)+'</div>');
+}
+
 function renderResumen(node) {
   const a = ac();
   const s = stats();
+  const wb = weekBadge();
+  if (wb) node.appendChild(wb);
   // Sin tareas esta semana -> modo vacaciones.
   if (s.total === 0) {
     node.appendChild(el(\`
@@ -491,13 +583,14 @@ function renderMaterias(node) {
     node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><div class="text-4xl mb-2" aria-hidden="true">🌴</div><p class="text-sm text-neutral-500 dark:text-neutral-400">No hay tareas esta semana. Disfruta tus vacaciones.</p></div>'));
     return;
   }
-  for (const [course, tasks] of groups) {
+  for (const g of groups) {
+    const tasks = g.tasks;
     const done = tasks.filter(t => t.status === 'done').length;
     const pct = Math.round(done / tasks.length * 100);
     const card = el(\`
-      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mb-3">
+      <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mb-3">
         <div class="flex items-center justify-between mb-1">
-          <h3 class="font-semibold flex items-center gap-2"><span class="inline-block h-2.5 w-2.5 rounded-full \${a.dot}"></span>\${esc(course)}</h3>
+          <h3 class="font-semibold text-sm flex items-center gap-2"><span class="inline-block h-2.5 w-2.5 rounded-full \${a.dot}"></span>\${esc(g.label)}</h3>
           <span class="text-xs text-neutral-500 dark:text-neutral-400">\${done}/\${tasks.length}</span>
         </div>
         <div class="h-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden mb-3"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${pct}%"></div></div>
@@ -642,6 +735,7 @@ function renderShell() {
     <div class="max-w-3xl mx-auto px-4 py-6">
       <header class="flex items-center justify-between gap-3 mb-5">
         <div>
+          <div class="text-neutral-400 dark:text-neutral-500 mb-1">\${brand('text-sm')}</div>
           <h1 class="text-xl font-semibold leading-tight">Hola, \${esc(state.profile.display_name||'')}</h1>
           <p class="text-xs text-neutral-500 dark:text-neutral-400">Semana \${esc(rangeText(state.range))}</p>
         </div>
