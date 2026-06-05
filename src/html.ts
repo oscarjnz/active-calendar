@@ -655,7 +655,8 @@ function renderAjustes(node) {
           <label class="text-sm" for="notifyTime">a las</label>
           <input id="notifyTime" type="time" value="\${esc(p.notify_time||'07:00')}" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm \${a.ring} focus:outline-none focus:ring-2" />
           <span class="text-xs text-neutral-400 dark:text-neutral-500">hora de RD (±30 min)</span>
-          <button id="testEmail" class="pressable ml-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm">Enviar prueba</button>
+          <button id="saveSchedule" class="pressable ml-auto \${a.solid} text-white rounded-lg px-3 py-1.5 text-sm">Guardar</button>
+          <button id="testEmail" title="Envía un correo ahora para confirmar que recibes de Active Calendar" class="pressable border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm">Enviar prueba</button>
         </div>
       </div>
       <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
@@ -725,12 +726,14 @@ function renderAjustes(node) {
     }
   });
 
-  // Día y hora personalizados: guardan al cambiar.
+  // Día y hora personalizados: se guardan SOLO al pulsar "Guardar". Esto no
+  // envía nada en el momento; solo registra cuándo debe enviarse el sistema.
   const DOW_NAMES = { 1:'lunes', 2:'martes', 3:'miércoles', 4:'jueves', 5:'viernes', 6:'sábado', 7:'domingo' };
   const notifyDow = card.querySelector('#notifyDow');
   const notifyTime = card.querySelector('#notifyTime');
-  async function saveSchedule(label) {
-    nmsg.textContent = 'Guardando…';
+  card.querySelector('#saveSchedule').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
+    nmsg.textContent = '';
     try {
       const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({
         notify_dow: parseInt(notifyDow.value, 10) || 1,
@@ -739,11 +742,10 @@ function renderAjustes(node) {
       state.profile = r.profile;
       notifyDow.value = String(r.profile.notify_dow || 1);
       notifyTime.value = r.profile.notify_time || '07:00';
-      nmsg.textContent = 'Listo: cada ' + (DOW_NAMES[r.profile.notify_dow] || 'lunes') + ' a las ' + (r.profile.notify_time || '07:00') + '.';
+      nmsg.textContent = 'Guardado: cada ' + (DOW_NAMES[r.profile.notify_dow] || 'lunes') + ' a las ' + (r.profile.notify_time || '07:00') + '.';
     } catch (err) { nmsg.textContent = 'Error: ' + err.message; }
-  }
-  notifyDow.addEventListener('change', saveSchedule);
-  notifyTime.addEventListener('change', saveSchedule);
+    finally { btn.disabled = false; btn.textContent = old; }
+  });
 
   // Botón de prueba: dispara un correo ahora.
   card.querySelector('#testEmail').addEventListener('click', async (e) => {
