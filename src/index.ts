@@ -3,6 +3,7 @@ import { collectEnrolledCourses, deriveCourseCode, filterInRange, parseIcal } fr
 import { computeDelta } from './diff';
 import {
   adminClient,
+  cleanupProfileCourses,
   clearTelegram,
   ensureProfile,
   getProfile,
@@ -234,6 +235,8 @@ export default {
       if (u instanceof Response) return u;
       try {
         const profile = await ensureProfile(sb, env, u);
+        // Auto-saneo de materias viejas (rellena nombres del pensum, quita las sin nombre).
+        profile.courses = await cleanupProfileCourses(sb, profile);
         const { start, end } = currentWeekRangeSdq();
         const tasks = await listWeekTasks(sb, u, start, end);
         return json({ profile, tasks, range: { start: start.toISOString(), end: end.toISOString() } });

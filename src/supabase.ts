@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Course, Env, IcalEvent, Profile, TaskRow } from './types';
 import { fetchClerkUser } from './clerk';
-import { normalizeCode } from './pensum';
+import { normalizeCode, pensumName } from './pensum';
 
 const VALID_ACCENTS = ['neutral', 'indigo', 'emerald', 'rose', 'amber', 'sky'] as const;
 
@@ -53,7 +53,21 @@ export async function ensureProfile(
   return data as Profile;
 }
 
-/** Sanea una lista de materias: normaliza códigos, recorta nombres y dedup. */
+/**
+ * ¿La materia tiene un nombre real? (no vacío y distinto del propio código).
+ * Si solo conocemos el código, no es una materia válida para mostrar.
+ */
+export function hasRealName(c: Course): boolean {
+  const name = (c.name ?? '').trim();
+  if (!name) return false;
+  return normalizeCode(name) !== normalizeCode(c.code);
+}
+
+/**
+ * Sanea una lista de materias: normaliza códigos, recorta nombres, dedup y
+ * DESCARTA las que no tienen nombre real (solo código). Si el pensum conoce el
+ * nombre del código, lo rellena en vez de descartar.
+ */
 function sanitizeCourses(input: unknown): Course[] {
   if (!Array.isArray(input)) return [];
   const byCode = new Map<string, Course>();
@@ -61,8 +75,12 @@ function sanitizeCourses(input: unknown): Course[] {
     if (!raw || typeof raw !== 'object') continue;
     const code = normalizeCode(String((raw as Course).code ?? ''));
     if (!code) continue;
-    const name = String((raw as Course).name ?? '').trim() || code;
-    if (!byCode.has(code)) byCode.set(code, { code, name });
+    let name = String((raw as Course).name ?? '').trim();
+    // Si no hay nombre (o es igual al código), intenta el del pensum.
+    if (!name || normalizeCode(name) === code) name = pensumName(code) ?? '';
+    const course: Course = { code, name };
+    if (!hasRealName(course)) continue; // sin nombre real -> fuera
+    if (!byCode.has(code)) byCode.set(code, course);
   }
   return [...byCode.values()];
 }
@@ -205,9 +223,36 @@ export async function setTaskCourse(
  */
 export function mergeCourses(existing: Course[], discovered: Course[]): Course[] {
   const byCode = new Map<string, Course>();
-  for (const c of discovered) byCode.set(c.code, c);
-  for (const c of existing) byCode.set(c.code, c); // las del perfil tienen prioridad
-  return [...byCode.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  for (const c of discovered) byCode.set(normalizeCode(c.code), { code: normalizeCode(c.code), name: c.name });
+  for (const c of existing) byCode.set(normalizeCode(c.code), { code: normalizeCode(c.code), name: c.name }); // el perfil manda
+  // Rellena nombres faltantes con el pensum y descarta las que sigan sin nombre real.
+  const out: Course[] = [];
+  for (const c of byCode.values()) {
+    const name = hasRealName(c) ? c.name : (pensumName(c.code) ?? '');
+    const fixed: Course = { code: c.code, name };
+    if (hasRealName(fixed)) out.push(fixed);
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/**
+ * Limpia las materias guardadas en el perfil (rellena nombres del pensum y quita
+ * las que no tengan nombre real). Si cambió algo, lo persiste. Devuelve la lista
+ * limpia. Sirve para auto-sanear perfiles viejos sin intervención manual.
+ */
+export async function cleanupProfileCourses(
+  sb: SupabaseClient,
+  profile: Profile,
+): Promise<Course[]> {
+  const current = profile.courses ?? [];
+  const cleaned = mergeCourses(current, []);
+  const changed =
+    cleaned.length !== current.length ||
+    cleaned.some((c, i) => c.code !== current[i]?.code || c.name !== current[i]?.name);
+  if (changed) {
+    await setProfileCourses(sb, profile.user_id, cleaned);
+  }
+  return cleaned;
 }
 
 /** Marca que se le acaba de enviar el correo (anti-duplicados en el cron). */
@@ -267,6 +312,11 @@ export async function linkTelegram(
 ): Promise<Profile | null> {
   const clean = code.trim();
   if (!clean) return null;
+  // Garantiza unicidad: si ese chat ya estaba en otro perfil, lo libera primero.
+  await sb
+    .from('profiles')
+    .update({ telegram_chat_id: null, telegram_notify: false })
+    .eq('telegram_chat_id', chatId);
   const { data, error } = await sb
     .from('profiles')
     .update({ telegram_chat_id: chatId, telegram_link_code: null, telegram_notify: true })
