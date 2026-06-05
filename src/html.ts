@@ -636,16 +636,22 @@ function renderAjustes(node) {
         <label class="block text-sm">URL iCal</label>
         <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
       </div>
-      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5">
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
             <h3 class="font-medium">Recordatorio por correo</h3>
-            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Un resumen diario de tus pendientes a \${esc(p.email||'tu correo')} cada mañana.</p>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Un resumen de tus pendientes a \${esc(p.email||'tu correo')}, a la hora que tú elijas.</p>
             <span id="nmsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
           </div>
           <button id="emailToggle" role="switch" aria-checked="\${p.email_notify?'true':'false'}" class="pressable shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 [transition-timing-function:var(--ease-out)] \${p.email_notify?a.bar:'bg-neutral-300 dark:bg-neutral-700'}">
             <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 [transition-timing-function:var(--ease-out)] \${p.email_notify?'translate-x-5':'translate-x-0.5'}"></span>
           </button>
+        </div>
+        <div id="notifyRow" class="flex flex-wrap items-center gap-3 transition-opacity duration-200 \${p.email_notify?'':'opacity-50 pointer-events-none'}">
+          <label class="text-sm" for="notifyTime">Hora de envío</label>
+          <input id="notifyTime" type="time" value="\${esc(p.notify_time||'07:00')}" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm \${a.ring} focus:outline-none focus:ring-2" />
+          <span class="text-xs text-neutral-400 dark:text-neutral-500">hora de RD · se envía a esa hora (±30 min)</span>
+          <button id="testEmail" class="pressable ml-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm">Enviar prueba</button>
         </div>
       </div>
       <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
@@ -690,6 +696,7 @@ function renderAjustes(node) {
   const toggle = card.querySelector('#emailToggle');
   const knob = toggle.querySelector('span');
   const nmsg = card.querySelector('#nmsg');
+  const notifyRow = card.querySelector('#notifyRow');
   function paintToggle(on) {
     toggle.setAttribute('aria-checked', on ? 'true' : 'false');
     toggle.classList.toggle(ac().bar, on);
@@ -697,6 +704,8 @@ function renderAjustes(node) {
     toggle.classList.toggle('dark:bg-neutral-700', !on);
     knob.classList.toggle('translate-x-5', on);
     knob.classList.toggle('translate-x-0.5', !on);
+    notifyRow.classList.toggle('opacity-50', !on);
+    notifyRow.classList.toggle('pointer-events-none', !on);
   }
   toggle.addEventListener('click', async () => {
     const next = toggle.getAttribute('aria-checked') !== 'true';
@@ -710,6 +719,31 @@ function renderAjustes(node) {
       paintToggle(!next);
       nmsg.textContent = 'Error: ' + err.message;
     }
+  });
+
+  // Hora personalizada: guarda al cambiar.
+  const notifyTime = card.querySelector('#notifyTime');
+  notifyTime.addEventListener('change', async () => {
+    const val = notifyTime.value || '07:00';
+    nmsg.textContent = 'Guardando hora…';
+    try {
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ notify_time: val }) });
+      state.profile = r.profile;
+      notifyTime.value = r.profile.notify_time || '07:00';
+      nmsg.textContent = 'Hora guardada: ' + (r.profile.notify_time || '07:00') + '.';
+    } catch (err) { nmsg.textContent = 'Error: ' + err.message; }
+  });
+
+  // Botón de prueba: dispara un correo ahora.
+  card.querySelector('#testEmail').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Enviando…';
+    nmsg.textContent = '';
+    try {
+      const r = await api('/api/test-email', { method: 'POST' });
+      nmsg.textContent = 'Correo de prueba enviado a ' + r.sent_to + ' (' + r.pending + ' pendientes).';
+    } catch (err) {
+      nmsg.textContent = 'Error: ' + err.message;
+    } finally { btn.disabled = false; btn.textContent = old; }
   });
 
   const accents = card.querySelector('#accents');
