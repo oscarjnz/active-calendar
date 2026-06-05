@@ -23,6 +23,10 @@ create table profiles (
   notify_dow int not null default 1,         -- día del envío (1=Lun..7=Dom)
   notify_time text not null default '07:00', -- hora local SDQ "HH:MM" del envío
   last_emailed timestamptz,                 -- último correo enviado (anti-duplicados)
+  telegram_chat_id text,                    -- chat de Telegram vinculado (null = sin vincular)
+  telegram_notify boolean not null default false, -- recibir recordatorio semanal por Telegram
+  telegram_link_code text,                  -- código temporal de un solo uso para vincular
+  last_telegram timestamptz,                -- último mensaje de Telegram (anti-duplicados)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -74,4 +78,8 @@ alter table profiles add column if not exists email_notify boolean not null defa
 alter table profiles add column if not exists notify_dow int not null default 1;
 alter table profiles add column if not exists notify_time text not null default '07:00';
 alter table profiles add column if not exists last_emailed timestamptz;
+alter table profiles add column if not exists telegram_chat_id text;
+alter table profiles add column if not exists telegram_notify boolean not null default false;
+alter table profiles add column if not exists telegram_link_code text;
+alter table profiles add column if not exists last_telegram timestamptz;
 alter table tasks add column if not exists course_code text;

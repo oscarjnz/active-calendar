@@ -3,21 +3,25 @@ import { collectEnrolledCourses, deriveCourseCode, filterInRange, parseIcal } fr
 import { computeDelta } from './diff';
 import {
   adminClient,
+  clearTelegram,
   ensureProfile,
   getProfile,
   listAllProfilesWithIcal,
   listWeekTasks,
   markEmailed,
+  markTelegramed,
   mergeCourses,
   setProfileCourses,
   setTaskCourse,
   setTaskStatus,
+  setTelegramLinkCode,
   updateProfile,
   upsertEvents,
 } from './supabase';
 import { getAuthUserId } from './clerk';
 import { currentAcademicWeek, currentWeekRangeSdq, toSdqParts } from './time';
 import { sendWeeklyEmail } from './email';
+import { handleTelegramUpdate, newLinkCode, sendWeeklyTelegram } from './telegram';
 import { renderApp } from './html';
 
 // Logo / favicon: marca minimalista (calendario + check) en SVG. Se sirve como
@@ -84,28 +88,51 @@ function notifyTimeReached(notifyTime: string | null, now: Date): boolean {
 }
 
 /**
- * Envía el recordatorio SEMANAL por correo si corresponde: el usuario lo quiere,
- * tiene correo, hoy es SU día elegido, ya pasó SU hora, hay pendientes y no se le
- * ha enviado hoy. Como solo un día de la semana coincide, sale un correo/semana.
- * Silencioso si no aplica.
+ * Envía el recordatorio SEMANAL por los canales que el usuario activó (correo y/o
+ * Telegram), si corresponde: hoy es SU día elegido, ya pasó SU hora, hay pendientes
+ * y no se le ha enviado hoy por ese canal. Como solo un día de la semana coincide,
+ * sale un recordatorio/semana por canal. Cada canal falla de forma aislada.
  */
-async function maybeEmail(
+async function maybeNotify(
   env: Env,
   sb: ReturnType<typeof adminClient>,
   profile: Profile,
   now: Date,
 ): Promise<void> {
-  if (!env.RESEND_API_KEY || !profile.email || !profile.email_notify) return;
-  if (profile.last_emailed && sameSdqDay(new Date(profile.last_emailed), now)) return;
   const dow = profile.notify_dow >= 1 && profile.notify_dow <= 7 ? profile.notify_dow : 1;
   if (toSdqParts(now).weekday !== dow) return;
   if (!notifyTimeReached(profile.notify_time, now)) return;
+
+  const wantEmail =
+    !!(env.RESEND_API_KEY && profile.email && profile.email_notify) &&
+    !(profile.last_emailed && sameSdqDay(new Date(profile.last_emailed), now));
+  const wantTelegram =
+    !!(env.TELEGRAM_BOT_TOKEN && profile.telegram_chat_id && profile.telegram_notify) &&
+    !(profile.last_telegram && sameSdqDay(new Date(profile.last_telegram), now));
+  if (!wantEmail && !wantTelegram) return;
+
   const { start, end } = currentWeekRangeSdq();
   const tasks = await listWeekTasks(sb, profile.user_id, start, end);
   const pending = tasks.filter((t) => t.status === 'pending');
   if (pending.length === 0) return;
-  await sendWeeklyEmail(env, profile, pending, currentAcademicWeek());
-  await markEmailed(sb, profile.user_id);
+  const week = currentAcademicWeek();
+
+  if (wantEmail) {
+    try {
+      await sendWeeklyEmail(env, profile, pending, week);
+      await markEmailed(sb, profile.user_id);
+    } catch (err) {
+      console.error(`email ${profile.user_id}:`, (err as Error).message);
+    }
+  }
+  if (wantTelegram) {
+    try {
+      await sendWeeklyTelegram(env, profile, pending, week);
+      await markTelegramed(sb, profile.user_id);
+    } catch (err) {
+      console.error(`telegram ${profile.user_id}:`, (err as Error).message);
+    }
+  }
 }
 
 function json(body: unknown, init: ResponseInit = {}): Response {
@@ -148,9 +175,9 @@ export default {
                 }
               }
               try {
-                await maybeEmail(env, sb, p, now);
+                await maybeNotify(env, sb, p, now);
               } catch (err) {
-                console.error(`email user ${p.user_id}:`, (err as Error).message);
+                console.error(`notify user ${p.user_id}:`, (err as Error).message);
               }
             }
           };
@@ -182,8 +209,25 @@ export default {
 
     if (path === '/api/health') return json({ ok: true });
 
-    // --- API autenticada con Clerk ---
     const sb = adminClient(env);
+
+    // --- Webhook de Telegram (NO usa Clerk; se valida con un secret) ---
+    if (path === '/api/telegram/webhook' && req.method === 'POST') {
+      const secret = req.headers.get('x-telegram-bot-api-secret-token');
+      if (!env.TELEGRAM_WEBHOOK_SECRET || secret !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response('forbidden', { status: 403 });
+      }
+      try {
+        const update = await req.json();
+        await handleTelegramUpdate(env, sb, update);
+      } catch (err) {
+        console.error('telegram webhook:', (err as Error).message);
+      }
+      // Siempre 200 para que Telegram no reintente en bucle.
+      return json({ ok: true });
+    }
+
+    // --- API autenticada con Clerk ---
 
     if (path === '/api/me' && req.method === 'GET') {
       const u = await requireUser(req, env);
@@ -211,6 +255,7 @@ export default {
           email_notify?: boolean;
           notify_dow?: number;
           notify_time?: string;
+          telegram_notify?: boolean;
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });
@@ -263,6 +308,35 @@ export default {
         return json({ ok: true, sent_to: profile.email, pending: pending.length });
       } catch (err) {
         return json({ error: (err as Error).message }, { status: 502 });
+      }
+    }
+
+    // Genera un código de vínculo y devuelve el enlace profundo al bot.
+    if (path === '/api/telegram/link' && req.method === 'POST') {
+      const u = await requireUser(req, env);
+      if (u instanceof Response) return u;
+      try {
+        if (!env.TELEGRAM_BOT_USERNAME || !env.TELEGRAM_BOT_TOKEN) {
+          return json({ error: 'Telegram no está configurado en el Worker' }, { status: 400 });
+        }
+        const code = newLinkCode();
+        await setTelegramLinkCode(sb, u, code);
+        const url = `https://t.me/${env.TELEGRAM_BOT_USERNAME}?start=${code}`;
+        return json({ ok: true, url, bot: env.TELEGRAM_BOT_USERNAME });
+      } catch (err) {
+        return json({ error: (err as Error).message }, { status: 500 });
+      }
+    }
+
+    // Desvincula Telegram desde la app.
+    if (path === '/api/telegram/unlink' && req.method === 'POST') {
+      const u = await requireUser(req, env);
+      if (u instanceof Response) return u;
+      try {
+        const profile = await clearTelegram(sb, u);
+        return json({ ok: true, profile });
+      } catch (err) {
+        return json({ error: (err as Error).message }, { status: 500 });
       }
     }
 

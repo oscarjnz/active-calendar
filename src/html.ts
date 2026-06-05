@@ -752,6 +752,23 @@ function renderAjustes(node) {
           <button id="testEmail" title="Envía un correo ahora para confirmar que recibes de Active Calendar" class="pressable border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm">Enviar prueba</button>
         </div>
       </div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="font-medium">Recordatorio semanal por Telegram</h3>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">El mismo resumen, gratis, por Telegram. Usa el mismo día y hora de arriba.</p>
+            <span id="tgmsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
+          </div>
+          <button id="tgToggle" role="switch" aria-checked="\${p.telegram_notify?'true':'false'}" class="pressable shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 [transition-timing-function:var(--ease-out)] \${p.telegram_notify?a.bar:'bg-neutral-300 dark:bg-neutral-700'} \${p.telegram_chat_id?'':'opacity-40 pointer-events-none'}">
+            <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 [transition-timing-function:var(--ease-out)] \${p.telegram_notify?'translate-x-5':'translate-x-0.5'}"></span>
+          </button>
+        </div>
+        <div id="tgRow" class="flex flex-wrap items-center gap-3">
+          \${p.telegram_chat_id
+            ? '<span class="inline-flex items-center gap-1 text-sm '+a.text+'"><span class="inline-block h-1.5 w-1.5 rounded-full '+a.dot+'"></span>Conectado</span><button id="tgUnlink" class="pressable ml-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm">Desconectar</button>'
+            : '<button id="tgConnect" class="pressable '+a.solid+' text-white rounded-lg px-3 py-1.5 text-sm">Conectar Telegram</button><span class="text-xs text-neutral-400 dark:text-neutral-500">Abre el bot y pulsa <b>Start</b>.</span>'}
+        </div>
+      </div>
       <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <div class="flex items-center justify-between">
           <h3 class="font-medium">Cuatrimestre y materias</h3>
@@ -855,6 +872,67 @@ function renderAjustes(node) {
       nmsg.textContent = 'Error: ' + err.message;
     } finally { btn.disabled = false; btn.textContent = old; }
   });
+
+  // ---- Telegram: conectar / desconectar / opt-in ----
+  const tgmsg = card.querySelector('#tgmsg');
+  const tgToggle = card.querySelector('#tgToggle');
+  const tgKnob = tgToggle.querySelector('span');
+  function paintTg(on) {
+    tgToggle.setAttribute('aria-checked', on ? 'true' : 'false');
+    tgToggle.classList.toggle(ac().bar, on);
+    tgToggle.classList.toggle('bg-neutral-300', !on);
+    tgToggle.classList.toggle('dark:bg-neutral-700', !on);
+    tgKnob.classList.toggle('translate-x-5', on);
+    tgKnob.classList.toggle('translate-x-0.5', !on);
+  }
+  tgToggle.addEventListener('click', async () => {
+    if (!state.profile.telegram_chat_id) return; // sin vincular no hace nada
+    const next = tgToggle.getAttribute('aria-checked') !== 'true';
+    paintTg(next);
+    tgmsg.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ telegram_notify: next }) });
+      state.profile = r.profile;
+      tgmsg.textContent = next ? 'Recordatorio por Telegram activado.' : 'Recordatorio por Telegram desactivado.';
+    } catch (err) { paintTg(!next); tgmsg.textContent = 'Error: ' + err.message; }
+  });
+
+  // Espera (en segundo plano) a que el usuario complete el "Start" en Telegram.
+  async function pollTgLink() {
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const me = await api('/api/me');
+        if (me.profile && me.profile.telegram_chat_id) { state.profile = me.profile; renderTab(); return; }
+      } catch (e) {}
+    }
+  }
+  const tgConnect = card.querySelector('#tgConnect');
+  if (tgConnect) {
+    tgConnect.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Generando…';
+      tgmsg.textContent = '';
+      try {
+        const r = await api('/api/telegram/link', { method: 'POST' });
+        window.open(r.url, '_blank', 'noopener');
+        tgmsg.textContent = 'Abre Telegram y pulsa Start. Esta página se actualizará sola al conectar…';
+        pollTgLink();
+      } catch (err) {
+        tgmsg.textContent = 'Error: ' + err.message;
+      } finally { btn.disabled = false; btn.textContent = old; }
+    });
+  }
+  const tgUnlink = card.querySelector('#tgUnlink');
+  if (tgUnlink) {
+    tgUnlink.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Desconectando…';
+      try {
+        const r = await api('/api/telegram/unlink', { method: 'POST' });
+        state.profile = r.profile;
+        renderTab();
+      } catch (err) { btn.disabled = false; btn.textContent = old; tgmsg.textContent = 'Error: ' + err.message; }
+    });
+  }
 
   const accents = card.querySelector('#accents');
   Object.keys(ACCENTS).forEach(name => {
