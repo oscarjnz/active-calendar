@@ -9,7 +9,7 @@ export function renderApp(env: Env): string {
     APP_BASE_URL: env.APP_BASE_URL ?? null,
   });
   // Pensum completo para el selector de materias (código, nombre, cuatrimestre, electiva).
-  const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem, c.elective ? 1 : 0]));
+  const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem, c.elective ? 1 : 0, c.concentration || '']));
   // Semana académica (bloque + 1-15) calculada server-side con la fecha actual.
   const week = JSON.stringify(currentAcademicWeek());
 
@@ -89,7 +89,7 @@ const cfg = window.__CFG__;
 const root = document.getElementById('root');
 
 // ---------- pensum / materias ----------
-const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem, elective]) => ({ code, name, sem, elective: !!elective }));
+const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem, elective, concentration]) => ({ code, name, sem, elective: !!elective, concentration: concentration || '' }));
 const PENSUM_BY_CODE = new Map(PENSUM.map(c => [c.code, c]));
 const WEEK = window.__WEEK__ || null;
 function normCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
@@ -165,6 +165,73 @@ function setupThemeToggle() {
   paint();
   document.body.appendChild(btn);
 }
+// ---------- modal genérico (centrado, animación emil) ----------
+function openModal(title, bodyHtml) {
+  const prev = document.querySelector('.app-modal');
+  if (prev) prev.remove();
+  const overlay = el('<div class="app-modal fixed inset-0 z-[60] flex items-center justify-center p-4"></div>');
+  const backdrop = el('<div class="absolute inset-0 bg-black/40 opacity-0 transition-opacity duration-200"></div>');
+  const panel = el('<div role="dialog" aria-modal="true" class="relative w-full max-w-lg max-h-[85vh] flex flex-col bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl opacity-0 scale-95 transition duration-200 [transition-timing-function:var(--ease-out)]"></div>');
+  panel.appendChild(el('<div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-neutral-200 dark:border-neutral-800"><h3 class="font-semibold">'+esc(title)+'</h3><button class="modal-x pressable h-8 w-8 -mr-1 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800" aria-label="Cerrar">✕</button></div>'));
+  const body = el('<div class="overflow-y-auto px-5 py-4 space-y-2"></div>');
+  body.innerHTML = bodyHtml;
+  panel.appendChild(body);
+  overlay.appendChild(backdrop);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => {
+    backdrop.classList.remove('opacity-0');
+    panel.classList.remove('opacity-0', 'scale-95');
+  });
+  function close() {
+    backdrop.classList.add('opacity-0');
+    panel.classList.add('opacity-0', 'scale-95');
+    document.removeEventListener('keydown', onKey);
+    setTimeout(() => overlay.remove(), 200);
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  backdrop.addEventListener('click', close);
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  return close;
+}
+
+// Contenido de las Políticas de privacidad. Describe con exactitud qué datos
+// se recopilan y qué NO. Mantener sincronizado con lo que el código realmente guarda.
+function privacyHtml() {
+  const h = (t) => '<h4 class="font-semibold text-sm mt-4 mb-1">'+t+'</h4>';
+  const p = (t) => '<p class="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">'+t+'</p>';
+  const ul = (items) => '<ul class="list-disc ml-5 space-y-1 text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">'+items.map(i => '<li>'+i+'</li>').join('')+'</ul>';
+  return [
+    '<p class="text-xs text-neutral-400 dark:text-neutral-500">Última actualización: 5 de junio de 2026</p>',
+    p('Active Calendar organiza, por materia, las tareas de tu calendario de Blackboard. Recopilamos lo mínimo necesario. Aquí te explicamos con claridad qué datos tocamos y qué hacemos con ellos.'),
+    h('Qué información guardamos'),
+    ul([
+      '<b>Tu cuenta:</b> nombre, correo y foto de perfil, provistos por nuestro proveedor de inicio de sesión al registrarte.',
+      '<b>Tu enlace de Blackboard (URL iCal):</b> el que tú pegas. Lo usamos solo para leer tus tareas; es privado y no se comparte.',
+      '<b>Tus tareas de la semana</b> leídas de ese enlace: título, materia, fecha de entrega, enlace a Blackboard y si la marcaste como hecha.',
+      '<b>Tus preferencias:</b> cuatrimestre, materias que cursas, color de acento y, si lo activas, la configuración del recordatorio por correo (día y hora).',
+    ]),
+    h('Qué NO hacemos'),
+    ul([
+      'No vendemos ni compartimos tu información con terceros con fines publicitarios.',
+      'No guardamos datos de profesores, aulas, horarios ni de la universidad (solo nombres y códigos de las materias).',
+      'No conocemos ni pedimos tu contraseña de Blackboard o de la universidad. Solo usamos el enlace de calendario que tú nos das.',
+    ]),
+    h('Para qué usamos tus datos'),
+    p('Únicamente para mostrarte tus tareas organizadas y, si lo activas, enviarte un recordatorio semanal por correo. Nada más.'),
+    h('Servicios que nos ayudan'),
+    p('Procesamos datos con proveedores de confianza, solo para que la app funcione: autenticación (Clerk), base de datos (Supabase), alojamiento (Cloudflare) y envío de correos (Resend, únicamente si activas los recordatorios).'),
+    h('Seguridad'),
+    p('La conexión está cifrada (HTTPS) y la base de datos solo es accesible desde nuestro servidor.'),
+    h('Tu control'),
+    p('Puedes cambiar o borrar tu enlace de Blackboard, desactivar los correos o eliminar tu cuenta cuando quieras. Al eliminar tu cuenta se borran tus datos asociados.'),
+    h('Contacto'),
+    p('¿Dudas o quieres eliminar tus datos? Escríbenos a <a class="underline decoration-dotted hover:decoration-solid" href="mailto:privacidad@activecalendar.site">privacidad@activecalendar.site</a>.'),
+  ].join('');
+}
+function openPrivacy() { openModal('Políticas de privacidad', privacyHtml()); }
+
 function fmtDue(iso) {
   if (!iso) return 'Sin fecha';
   const d = new Date(new Date(iso).getTime() - 4 * 3600 * 1000); // a SDQ
@@ -215,12 +282,14 @@ function renderLanding() {
           <div class="md:hidden mb-1 text-xl">\${brand()}</div>
           <p class="text-neutral-600 dark:text-neutral-300 mb-6 md:hidden">Tus tareas de Blackboard en un solo lugar.</p>
           <div id="signin"></div>
+          <p class="mt-6 text-center text-xs text-neutral-400 dark:text-neutral-500"><button id="privacyLink" class="pressable underline decoration-dotted hover:decoration-solid hover:text-neutral-600 dark:hover:text-neutral-300">Políticas de privacidad</button></p>
         </div>
       </div>
     </div>
   \`);
   root.appendChild(wrap);
   clerk.mountSignIn(document.getElementById('signin'), { afterSignInUrl: cfg.APP_BASE_URL, afterSignUpUrl: cfg.APP_BASE_URL });
+  wrap.querySelector('#privacyLink').addEventListener('click', openPrivacy);
 }
 
 // ---------- render: onboarding (sin enlace) ----------
@@ -311,9 +380,9 @@ function coursePicker(selected, initialTerm) {
       </label>
       <div id="moreBox" class="space-y-4 \${showMore?'':'hidden'}">
         <div>
-          <span class="text-sm font-medium">Electivas</span>
-          <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Marca las electivas que estás cursando.</p>
-          <div id="elecChips" class="flex flex-wrap gap-2"></div>
+          <span class="text-sm font-medium">Electivas por concentración</span>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Marca las electivas que estás cursando. Están agrupadas por concentración.</p>
+          <div id="elecChips" class="space-y-3"></div>
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Materias de otro cuatrimestre</label>
@@ -366,8 +435,22 @@ function coursePicker(selected, initialTerm) {
   }
   function drawElectives() {
     elecBox.innerHTML = '';
-    const list = PENSUM.filter(x => x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
-    for (const c of list) elecBox.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
+    // Agrupa las electivas por concentración para una elección más clara.
+    const groups = new Map();
+    for (const c of PENSUM.filter(x => x.elective)) {
+      const g = c.concentration || 'Otras electivas';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(c);
+    }
+    for (const [g, list] of groups) {
+      list.sort((x,y) => x.name.localeCompare(y.name, 'es'));
+      const sec = el('<div class="space-y-1.5"></div>');
+      sec.appendChild(el('<div class="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">'+esc(g)+'</div>'));
+      const chips = el('<div class="flex flex-wrap gap-2"></div>');
+      for (const c of list) chips.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
+      sec.appendChild(chips);
+      elecBox.appendChild(sec);
+    }
   }
   function drawOther() {
     otherBox.innerHTML = '';
@@ -437,11 +520,6 @@ function taskCourse(t) {
   if (t.course) return { code: null, name: t.course };
   return null;
 }
-// Etiqueta lista para mostrar (CÓDIGO · NOMBRE), o null.
-function taskCourseLabel(t) {
-  const c = taskCourse(t);
-  return c ? fmtCourse(c.code, c.name) : null;
-}
 // Agrupa tareas por materia. Devuelve [{code,name,label,tasks}], "Sin materia" al final.
 function byCourse() {
   const map = new Map();
@@ -464,7 +542,6 @@ function byCourse() {
 function taskRow(t) {
   const a = ac();
   const done = t.status === 'done';
-  const label = taskCourseLabel(t);
   const row = el(\`
     <div class="card flex items-start gap-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-3 hover:border-neutral-300 dark:hover:border-neutral-700 hover:shadow-sm">
       <input type="checkbox" class="chk mt-0.5 h-4 w-4 accent-neutral-900 cursor-pointer shrink-0" \${done ? 'checked' : ''} />
@@ -472,7 +549,7 @@ function taskRow(t) {
         <div class="text-sm \${done ? 'line-through text-neutral-400 dark:text-neutral-600' : 'font-medium'}">\${esc(t.summary)}</div>
         <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>\${esc(fmtDue(t.due))}</span>
-          \${label ? '<span class="inline-flex items-center gap-1 '+a.text+'"><span class="inline-block h-1.5 w-1.5 rounded-full '+a.dot+'"></span>'+esc(label)+'</span>' : '<span class="materia-slot"></span>'}
+          <span class="materia-slot"></span>
           \${t.url ? '<a class="underline decoration-dotted hover:decoration-solid" target="_blank" rel="noopener" href="'+esc(t.url)+'">abrir en Blackboard</a>' : ''}
         </div>
       </div>
@@ -493,15 +570,22 @@ function taskRow(t) {
       e.target.disabled = false;
     }
   });
-  // Si la tarea no tiene materia, ofrecer un selector para asignarla manualmente.
+  // Materia: muestra la asignada (clic para cambiarla/quitarla) o un selector
+  // para asignarla. El estudiante siempre puede corregir una materia equivocada.
   const slot = row.querySelector('.materia-slot');
   if (slot) {
     const opts = myCourses();
-    if (opts.length) {
-      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 '+a.ring+'"><option value="">+ Asignar materia</option>'+opts.map(c => '<option value="'+esc(c.code)+'">'+esc(fmtCourse(c.code, c.name))+'</option>').join('')+'</select>');
+    const cur = taskCourse(t);
+    // Asegura que la materia actual aparezca en el selector aunque no esté en "mis materias".
+    const optList = opts.slice();
+    if (cur && cur.code && !optList.some(o => normCode(o.code) === cur.code)) optList.unshift({ code: cur.code, name: cur.name });
+
+    function buildSelect() {
+      const first = cur ? '<option value="">— Sin materia</option>' : '<option value="">+ Asignar materia</option>';
+      const body = optList.map(c => '<option value="'+esc(c.code)+'"'+((cur && cur.code && cur.code === normCode(c.code))?' selected':'')+'>'+esc(fmtCourse(c.code, c.name))+'</option>').join('');
+      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 '+a.ring+'">'+first+body+'</select>');
       sel.addEventListener('change', async (e) => {
-        const code = e.target.value;
-        if (!code) return;
+        const code = e.target.value || null;
         e.target.disabled = true;
         try {
           await api('/api/task', { method: 'POST', body: JSON.stringify({ uid: t.uid, course_code: code }) });
@@ -513,7 +597,16 @@ function taskRow(t) {
           e.target.disabled = false;
         }
       });
-      slot.replaceWith(sel);
+      return sel;
+    }
+
+    if (cur) {
+      // Materia asignada: chip con punto de color; clic para editarla.
+      const chip = el('<button type="button" title="Cambiar materia" class="pressable inline-flex items-center gap-1 '+a.text+' hover:opacity-80"><span class="inline-block h-1.5 w-1.5 rounded-full '+a.dot+'"></span>'+esc(fmtCourse(cur.code, cur.name))+'<span class="text-neutral-400 dark:text-neutral-500 text-[10px]">✎</span></button>');
+      chip.addEventListener('click', () => { const s = buildSelect(); chip.replaceWith(s); s.focus(); });
+      slot.replaceWith(chip);
+    } else if (optList.length) {
+      slot.replaceWith(buildSelect());
     } else {
       slot.remove();
     }
@@ -676,9 +769,13 @@ function renderAjustes(node) {
         <button id="resync" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-4 py-2">Sincronizar ahora</button>
         <span id="msg" class="text-sm text-neutral-500 dark:text-neutral-400"></span>
       </div>
+      <div class="pt-1">
+        <button id="privacyLink" class="pressable text-sm text-neutral-500 dark:text-neutral-400 underline decoration-dotted hover:decoration-solid hover:text-neutral-700 dark:hover:text-neutral-200">Políticas de privacidad</button>
+      </div>
     </div>
   \`);
   node.appendChild(card);
+  card.querySelector('#privacyLink').addEventListener('click', openPrivacy);
 
   // Selector de cuatrimestre + materias.
   const selected = new Map((p.courses || []).map(c => [normCode(c.code), { code: normCode(c.code), name: c.name }]));
@@ -833,10 +930,15 @@ function renderShell() {
         \${TABS.map(([k,l]) => '<button data-tab="'+k+'" class="tabbtn px-3 py-2 text-sm rounded-lg whitespace-nowrap">'+l+'</button>').join('')}
       </nav>
       <main id="tabContent"></main>
+      <footer class="mt-10 pt-4 border-t border-neutral-200 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-400 dark:text-neutral-500">
+        <span>© 2026 Active Calendar</span>
+        <button id="privacyLink" class="pressable hover:text-neutral-700 dark:hover:text-neutral-300 underline decoration-dotted hover:decoration-solid">Políticas de privacidad</button>
+      </footer>
     </div>
   \`);
   root.appendChild(shell);
   mountUserButton(document.getElementById('userbtn'));
+  shell.querySelector('#privacyLink').addEventListener('click', openPrivacy);
   shell.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { state.tab = b.dataset.tab; renderTab(); }));
   shell.querySelector('#syncBtn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
