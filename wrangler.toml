@@ -18,12 +18,16 @@ APP_BASE_URL = "https://activecalendar.site"
 CLERK_PUBLISHABLE_KEY = "pk_live_Y2xlcmsuYWN0aXZlY2FsZW5kYXIuc2l0ZSQ"
 # Remitente de los correos (no es secreto). El dominio debe estar verificado en Resend.
 RESEND_FROM = "Active Calendar <recordatorios@activecalendar.site>"
+# Usuario del bot de Telegram (público, sin @). Se usa para el enlace t.me de conexión.
+TELEGRAM_BOT_USERNAME = "ActiveCalendarBot"
 
 # Secrets (cargar en el dashboard de Cloudflare o con `wrangler secret put`):
-#   CLERK_SECRET_KEY      sk_...  verifica tokens y consulta usuarios de Clerk
-#   SUPABASE_URL          URL del proyecto Supabase
-#   SUPABASE_SERVICE_KEY  service role key (bypass RLS; solo server-side)
-#   RESEND_API_KEY        re_...  envía los correos (recordatorio diario)
+#   CLERK_SECRET_KEY        sk_...  verifica tokens y consulta usuarios de Clerk
+#   SUPABASE_URL            URL del proyecto Supabase
+#   SUPABASE_SERVICE_KEY    service role key (bypass RLS; solo server-side)
+#   RESEND_API_KEY          re_...  envía los correos (recordatorio semanal)
+#   TELEGRAM_BOT_TOKEN      123:ABC... token del bot (de @BotFather)
+#   TELEGRAM_WEBHOOK_SECRET cadena aleatoria; valida que el webhook viene de Telegram
 
 [observability]
 enabled = true

@@ -5,6 +5,9 @@ import { normalizeCode } from './pensum';
 
 const VALID_ACCENTS = ['neutral', 'indigo', 'emerald', 'rose', 'amber', 'sky'] as const;
 
+/** Alias para el cliente de Supabase (lo usan otros módulos sin reimportar). */
+export type SbClient = SupabaseClient;
+
 /** Cliente con service_role: bypass RLS. Es el único que toca la base de datos. */
 export function adminClient(env: Env): SupabaseClient {
   return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
@@ -76,12 +79,14 @@ export async function updateProfile(
     email_notify?: boolean;
     notify_dow?: number;
     notify_time?: string;
+    telegram_notify?: boolean;
   },
 ): Promise<Profile> {
   const patch: Record<string, unknown> = {};
   if ('display_name' in fields) patch.display_name = fields.display_name?.trim() || null;
   if ('ical_url' in fields) patch.ical_url = fields.ical_url?.trim() || null;
   if ('email_notify' in fields) patch.email_notify = !!fields.email_notify;
+  if ('telegram_notify' in fields) patch.telegram_notify = !!fields.telegram_notify;
   if ('notify_dow' in fields) {
     const d = fields.notify_dow;
     patch.notify_dow = typeof d === 'number' && d >= 1 && d <= 7 ? Math.floor(d) : 1;
@@ -212,6 +217,85 @@ export async function markEmailed(sb: SupabaseClient, userId: string): Promise<v
     .update({ last_emailed: new Date().toISOString() })
     .eq('user_id', userId);
   if (error) throw new Error(`profiles.markEmailed: ${error.message}`);
+}
+
+/** Marca que se le acaba de enviar el mensaje de Telegram (anti-duplicados). */
+export async function markTelegramed(sb: SupabaseClient, userId: string): Promise<void> {
+  const { error } = await sb
+    .from('profiles')
+    .update({ last_telegram: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (error) throw new Error(`profiles.markTelegramed: ${error.message}`);
+}
+
+/** Guarda un código de vínculo de un solo uso para el usuario. */
+export async function setTelegramLinkCode(
+  sb: SupabaseClient,
+  userId: string,
+  code: string,
+): Promise<void> {
+  const { error } = await sb
+    .from('profiles')
+    .update({ telegram_link_code: code })
+    .eq('user_id', userId);
+  if (error) throw new Error(`profiles.setTelegramLinkCode: ${error.message}`);
+}
+
+/** Perfil vinculado a un chat de Telegram, o null. */
+export async function getProfileByTelegramChatId(
+  sb: SupabaseClient,
+  chatId: string,
+): Promise<Profile | null> {
+  const { data, error } = await sb
+    .from('profiles')
+    .select('*')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+  if (error) throw new Error(`profiles.byChatId: ${error.message}`);
+  return (data as Profile | null) ?? null;
+}
+
+/**
+ * Canjea un código de vínculo: si existe un perfil con ese telegram_link_code,
+ * le asocia el chat_id, limpia el código, activa el opt-in y devuelve el perfil.
+ * Devuelve null si el código no existe (inválido o ya usado).
+ */
+export async function linkTelegram(
+  sb: SupabaseClient,
+  code: string,
+  chatId: string,
+): Promise<Profile | null> {
+  const clean = code.trim();
+  if (!clean) return null;
+  const { data, error } = await sb
+    .from('profiles')
+    .update({ telegram_chat_id: chatId, telegram_link_code: null, telegram_notify: true })
+    .eq('telegram_link_code', clean)
+    .select('*')
+    .maybeSingle();
+  if (error) throw new Error(`profiles.linkTelegram: ${error.message}`);
+  return (data as Profile | null) ?? null;
+}
+
+/** Desvincula el chat de Telegram (lo dispara el comando /stop del bot). */
+export async function unlinkTelegram(sb: SupabaseClient, chatId: string): Promise<void> {
+  const { error } = await sb
+    .from('profiles')
+    .update({ telegram_chat_id: null, telegram_notify: false })
+    .eq('telegram_chat_id', chatId);
+  if (error) throw new Error(`profiles.unlinkTelegram: ${error.message}`);
+}
+
+/** Desvincula Telegram desde la app (por user_id): limpia chat, opt-in y código. */
+export async function clearTelegram(sb: SupabaseClient, userId: string): Promise<Profile> {
+  const { data, error } = await sb
+    .from('profiles')
+    .update({ telegram_chat_id: null, telegram_notify: false, telegram_link_code: null })
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) throw new Error(`profiles.clearTelegram: ${error.message}`);
+  return data as Profile;
 }
 
 /** Persiste la lista de materias del perfil (sin tocar otros campos). */

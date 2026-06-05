@@ -10,6 +10,10 @@ export interface Env {
   // Resend (correo). RESEND_API_KEY es secreta; RESEND_FROM es opcional.
   RESEND_API_KEY: string; // re_... -> secreta, autentica el envío de correos
   RESEND_FROM?: string; // remitente, ej. "Active Calendar <recordatorios@activecalendar.site>"
+  // Telegram (bot). TOKEN y WEBHOOK_SECRET son secretos; BOT_USERNAME es público.
+  TELEGRAM_BOT_TOKEN?: string; // secreto: autentica las llamadas a la Bot API
+  TELEGRAM_WEBHOOK_SECRET?: string; // secreto: valida que el webhook viene de Telegram
+  TELEGRAM_BOT_USERNAME?: string; // público: usuario del bot para el enlace t.me (sin @)
 }
 
 export interface IcalEvent {
@@ -44,6 +48,10 @@ export interface Profile {
   notify_dow: number; // día de la semana elegido para el envío (1=Lun..7=Dom)
   notify_time: string; // hora local SDQ "HH:MM" elegida por el usuario para el envío
   last_emailed: string | null; // ISO del último correo enviado (anti-duplicados)
+  telegram_chat_id: string | null; // chat de Telegram vinculado (null = sin vincular)
+  telegram_notify: boolean; // recibir el recordatorio semanal por Telegram
+  telegram_link_code: string | null; // código temporal de un solo uso para vincular
+  last_telegram: string | null; // ISO del último mensaje de Telegram (anti-duplicados)
   created_at: string;
   updated_at: string;
 }
