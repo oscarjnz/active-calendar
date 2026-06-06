@@ -382,7 +382,7 @@ function coursePicker(selected, initialTerm) {
           <span class="text-sm font-medium">Tus materias</span>
           <span id="selCount" class="text-xs text-neutral-500 dark:text-neutral-400"></span>
         </div>
-        <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Toca para marcar las que estás cursando. Las electivas que detectemos de tu Blackboard ya vienen marcadas.</p>
+        <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Selecciona las materias que estás cursando. Las electivas que detectemos en tu Blackboard ya vienen marcadas.</p>
         <div id="chips" class="flex flex-wrap gap-2"></div>
       </div>
       <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -651,7 +651,7 @@ function renderResumen(node) {
     node.appendChild(el(\`
       <div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-14">
         <div class="text-5xl mb-3" aria-hidden="true">🌴</div>
-        <h2 class="text-xl font-semibold">Disfruta tus vacaciones</h2>
+        <h2 class="text-xl font-semibold">Semana despejada</h2>
         <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto">No hay tareas para esta semana. Si crees que deberías ver algo, sincroniza de nuevo o revisa tu enlace en Ajustes.</p>
         <button id="vacSync" class="\${a.solid} text-white text-sm rounded-lg px-4 py-2 mt-6">Sincronizar ahora</button>
       </div>
@@ -680,7 +680,7 @@ function renderResumen(node) {
   \`));
   const up = el('<div class="mt-4"><h3 class="text-sm font-medium mb-2">Próximas pendientes</h3><div class="space-y-2 stagger"></div></div>');
   const list = up.querySelector('div.space-y-2');
-  if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Nada pendiente. ¡Bien ahí!</p>'));
+  if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Sin pendientes próximas. Vas al día.</p>'));
   else upcoming.forEach(t => list.appendChild(taskRow(t)));
   node.appendChild(up);
 }
@@ -689,7 +689,7 @@ function renderMaterias(node) {
   const a = ac();
   const groups = byCourse();
   if (groups.length === 0) {
-    node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><div class="text-4xl mb-2" aria-hidden="true">🌴</div><p class="text-sm text-neutral-500 dark:text-neutral-400">No hay tareas esta semana. Disfruta tus vacaciones.</p></div>'));
+    node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><div class="text-4xl mb-2" aria-hidden="true">🌴</div><p class="text-sm text-neutral-500 dark:text-neutral-400">Sin tareas esta semana. Estás al día.</p></div>'));
     return;
   }
   for (const g of groups) {
@@ -724,7 +724,7 @@ function renderTodas(node) {
   if (state.filter === 'pending') list = list.filter(t => t.status === 'pending');
   if (state.filter === 'done') list = list.filter(t => t.status === 'done');
   const box = el('<div class="space-y-2 stagger"></div>');
-  if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Nada por aquí.</p>'));
+  if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">No hay tareas que mostrar.</p>'));
   else list.forEach(t => box.appendChild(taskRow(t)));
   node.appendChild(box);
 }
