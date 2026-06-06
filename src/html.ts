@@ -772,7 +772,7 @@ function renderAjustes(node) {
         <div class="flex items-start justify-between gap-4">
           <div>
             <h3 class="font-medium">Recordatorio semanal por Telegram</h3>
-            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">El mismo resumen, gratis, por Telegram. Usa el mismo día y hora de arriba.</p>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Recibe tu resumen semanal de pendientes en Telegram, el mismo día y hora que configures arriba.</p>
             <span id="tgmsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
           </div>
           <button id="tgToggle" role="switch" aria-checked="\${p.telegram_notify?'true':'false'}" class="pressable shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 [transition-timing-function:var(--ease-out)] \${p.telegram_notify?a.bar:'bg-neutral-300 dark:bg-neutral-700'} \${p.telegram_chat_id?'':'opacity-40 pointer-events-none'}">
