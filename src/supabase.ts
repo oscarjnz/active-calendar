@@ -180,9 +180,15 @@ export async function upsertEvents(
       last_modified: ev.lastModified ? ev.lastModified.toISOString() : null,
       status: prev?.status ?? 'pending',
       last_seen: now,
-      ...(prev ? {} : { first_seen: now }),
+      // Siempre presente: conserva el original si la tarea ya existía, o ahora
+      // si es nueva. Debe ir en TODAS las filas (ver nota en el upsert de abajo).
+      first_seen: prev?.first_seen ?? now,
     };
   });
+  // OJO: PostgREST construye un único INSERT con la UNIÓN de claves de todas las
+  // filas; las filas que omitan una clave la mandan como NULL explícito (no usa el
+  // default de la columna). Por eso first_seen va en todas las filas: si un lote
+  // mezcla tareas nuevas y existentes, omitirlo en unas rompía la NOT NULL.
   const { error } = await sb.from('tasks').upsert(rows, { onConflict: 'user_id,uid' });
   if (error) throw new Error(`tasks.upsert: ${error.message}`);
 }
