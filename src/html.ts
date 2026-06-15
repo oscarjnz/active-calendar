@@ -142,7 +142,11 @@ const ACCENTS = {
   amber:   { solid: 'bg-amber-500 hover:bg-amber-600', text: 'text-amber-700', soft: 'bg-amber-50', ring: 'focus:ring-amber-500', bar: 'bg-amber-500', dot: 'bg-amber-500' },
   sky:     { solid: 'bg-sky-600 hover:bg-sky-700', text: 'text-sky-700', soft: 'bg-sky-50', ring: 'focus:ring-sky-600', bar: 'bg-sky-600', dot: 'bg-sky-600' },
 };
+// Equivalente en HEX de cada acento, para el documento exportado (estilos en
+// línea, siempre en claro, independientes del tema de la app).
+const ACCENT_HEX = { neutral: '#0a0a0a', indigo: '#4f46e5', emerald: '#059669', rose: '#e11d48', amber: '#d97706', sky: '#0284c7' };
 function ac() { return ACCENTS[state.profile?.accent] || ACCENTS.neutral; }
+function acHex() { return ACCENT_HEX[state.profile && state.profile.accent] || ACCENT_HEX.neutral; }
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -241,6 +245,258 @@ function privacyHtml() {
   ].join('');
 }
 function openPrivacy() { openModal('Políticas de privacidad', privacyHtml()); }
+
+// ---------- exportar tareas (PDF / imagen / texto) ----------
+// Logo en línea (tamaño/color explícitos) para que se vea igual al rasterizar.
+function docLogo(px, color) {
+  return '<svg viewBox="0 0 32 32" width="'+px+'" height="'+px+'" fill="none" stroke="'+(color||'currentColor')+'" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+
+    '<path d="M11 4.5v3.5M21 4.5v3.5"/><rect x="6.5" y="7" width="19" height="17" rx="3.6"/><path d="M11.5 16l3 3 6.5-7"/></svg>';
+}
+// Fecha legible en hora de RD (UTC-4), p. ej. "5 de junio de 2026".
+function expDateStr() {
+  const d = new Date(new Date().getTime() - 4 * 3600 * 1000);
+  const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return d.getUTCDate() + ' de ' + months[d.getUTCMonth()] + ' de ' + d.getUTCFullYear();
+}
+function expStudentName() {
+  return (state.profile && state.profile.display_name) ? state.profile.display_name : 'Estudiante';
+}
+function expFilename(ext) { return 'Tareas - ' + expStudentName() + '.' + ext; }
+
+// HTML del documento (tamaño carta/A4 vertical, estilos en línea, siempre claro).
+// Mismo espíritu que el correo, pero como hoja con cabecera, resumen y pie.
+function exportDocHtml() {
+  const accent = acHex();
+  const name = expStudentName();
+  const groups = byCourse();
+  const s = stats();
+  const range = rangeText(state.range);
+  const weekLine = WEEK ? (WEEK.week ? ('Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel) : ('En receso · ' + WEEK.blockLabel)) : 'Resumen de tareas';
+
+  function statBox(n, label) {
+    return '<div style="flex:1;border:1px solid #e9e9e9;border-radius:12px;padding:14px 16px;">'+
+      '<div style="font-size:24px;font-weight:700;line-height:1;">'+n+'</div>'+
+      '<div style="font-size:11px;color:#737373;margin-top:5px;">'+label+'</div></div>';
+  }
+
+  let bodyHtml;
+  if (!groups.length) {
+    bodyHtml = '<div style="margin-top:40px;text-align:center;border:1px dashed #e0e0e0;border-radius:16px;padding:52px 24px;">'+
+      '<div style="font-size:40px;">🌴</div>'+
+      '<div style="margin-top:10px;font-size:16px;font-weight:600;">Semana despejada</div>'+
+      '<div style="margin-top:4px;font-size:13px;color:#737373;">No hay tareas registradas para esta semana.</div></div>';
+  } else {
+    const statsHtml = '<div style="display:flex;gap:12px;margin-top:22px;">'+
+      statBox(s.pending,'Pendientes') + statBox(s.done,'Hechas') + statBox(s.total,'Total') + '</div>';
+    const groupsHtml = groups.map(function (g) {
+      const done = g.tasks.filter(function (t) { return t.status === 'done'; }).length;
+      const rows = g.tasks.map(function (t) {
+        const isDone = t.status === 'done';
+        const ind = isDone
+          ? '<span style="display:inline-flex;width:16px;height:16px;border-radius:9999px;background:'+accent+';color:#fff;align-items:center;justify-content:center;font-size:10px;line-height:1;flex:0 0 auto;">✓</span>'
+          : '<span style="display:inline-block;width:14px;height:14px;border-radius:9999px;border:1.5px solid #cfcfcf;flex:0 0 auto;"></span>';
+        const titleStyle = isDone
+          ? 'font-size:13px;line-height:1.4;color:#a3a3a3;text-decoration:line-through;'
+          : 'font-size:13px;line-height:1.4;color:#171717;';
+        return '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
+          '<span style="margin-top:1px;">'+ind+'</span>'+
+          '<div style="flex:1 1 auto;min-width:0;"><div style="'+titleStyle+'">'+esc(t.summary)+'</div></div>'+
+          '<div style="font-size:11px;color:#737373;white-space:nowrap;margin-left:10px;">'+esc(fmtDue(t.due))+'</div></div>';
+      }).join('');
+      return '<div style="margin-top:22px;break-inside:avoid;">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+        '<span style="display:inline-block;width:8px;height:8px;border-radius:9999px;background:'+accent+';flex:0 0 auto;"></span>'+
+        '<span style="font-size:12px;font-weight:700;letter-spacing:0.03em;color:#404040;">'+esc(g.label)+'</span>'+
+        '<span style="margin-left:auto;font-size:11px;color:#a3a3a3;">'+done+'/'+g.tasks.length+'</span></div>'+
+        rows + '</div>';
+    }).join('');
+    bodyHtml = statsHtml + groupsHtml;
+  }
+
+  return '<div style="width:794px;box-sizing:border-box;background:#ffffff;color:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;min-height:1123px;padding:56px 56px 44px;display:flex;flex-direction:column;">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0a0a0a;padding-bottom:18px;">'+
+      '<div style="display:flex;align-items:center;gap:10px;"><span style="display:inline-flex;color:'+accent+';">'+docLogo(28)+'</span>'+
+      '<span style="font-size:18px;font-weight:700;letter-spacing:-0.01em;">Active Calendar</span></div>'+
+      '<div style="text-align:right;font-size:11px;color:#737373;line-height:1.6;"><div style="font-weight:600;color:#0a0a0a;">Reporte de tareas</div><div>'+esc(expDateStr())+'</div></div>'+
+    '</div>'+
+    '<div style="margin-top:28px;">'+
+      '<div style="font-size:11px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:'+accent+';">'+esc(weekLine)+'</div>'+
+      '<h1 style="margin:7px 0 0;font-size:27px;font-weight:700;letter-spacing:-0.02em;">'+esc(name)+'</h1>'+
+      (range ? '<div style="margin-top:4px;font-size:13px;color:#737373;">Semana del '+esc(range)+'</div>' : '')+
+    '</div>'+
+    bodyHtml +
+    '<div style="flex:1 1 auto;"></div>'+
+    '<div style="margin-top:36px;padding-top:16px;border-top:1px solid #ececec;display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#a3a3a3;">'+
+      '<span style="display:inline-flex;align-items:center;gap:6px;color:#737373;"><span style="display:inline-flex;color:'+accent+';">'+docLogo(13)+'</span>Powered by Active Calendar</span>'+
+      '<span>Developed by Oscar O. Jiménez · © 2026</span></div>'+
+  '</div>';
+}
+
+// Versión en texto plano: sin asteriscos, almohadillas ni marcas de formato.
+function exportText() {
+  const name = expStudentName();
+  const groups = byCourse();
+  const s = stats();
+  const range = rangeText(state.range);
+  const weekLine = WEEK ? (WEEK.week ? ('Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel) : ('En receso · ' + WEEK.blockLabel)) : '';
+  const L = [];
+  L.push('ACTIVE CALENDAR — Reporte de tareas');
+  L.push(expDateStr());
+  L.push('');
+  L.push('Estudiante: ' + name);
+  if (range) L.push('Semana del ' + range);
+  if (weekLine) L.push(weekLine);
+  L.push('');
+  if (!groups.length) {
+    L.push('Semana despejada: no hay tareas registradas para esta semana.');
+  } else {
+    L.push(s.pending + ' pendientes · ' + s.done + ' hechas · ' + s.total + ' en total');
+    L.push('');
+    groups.forEach(function (g) {
+      L.push(g.label);
+      L.push('-'.repeat(Math.min(g.label.length, 44)));
+      g.tasks.forEach(function (t) {
+        L.push((t.status === 'done' ? '[x] ' : '[ ] ') + t.summary + '  (' + fmtDue(t.due) + ')');
+      });
+      L.push('');
+    });
+  }
+  L.push('—');
+  L.push('Powered by Active Calendar · Developed by Oscar O. Jiménez');
+  return L.join('\\n');
+}
+
+// Carga perezosa de las librerías de render (solo al exportar PDF/imagen).
+let _expLibs = null;
+function loadExportLibs() {
+  if (_expLibs) return _expLibs;
+  _expLibs = Promise.all([
+    import('https://esm.sh/html2canvas@1.4.1'),
+    import('https://esm.sh/jspdf@2.5.2'),
+  ]).then(function (mods) {
+    const h2c = mods[0].default || mods[0];
+    const jspdf = mods[1];
+    const jsPDF = jspdf.jsPDF || (jspdf.default && jspdf.default.jsPDF) || jspdf.default;
+    return { html2canvas: h2c, jsPDF: jsPDF };
+  });
+  return _expLibs;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 1500);
+}
+
+// Renderiza el documento (fuera de pantalla, a tamaño real) a un <canvas>.
+async function expRenderCanvas(html2canvas) {
+  const doc = el(exportDocHtml());
+  doc.style.width = '794px';
+  const holder = el('<div style="position:fixed;left:-10000px;top:0;z-index:-1;"></div>');
+  holder.appendChild(doc);
+  document.body.appendChild(holder);
+  try {
+    return await html2canvas(doc, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+  } finally {
+    holder.remove();
+  }
+}
+
+// Popup con las 3 vistas: PDF, imagen .jpg y texto plano. Vista previa en vivo.
+function openExportModal() {
+  let mode = 'pdf';
+  const segBody = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;" id="expSeg" class="p-1 rounded-xl bg-neutral-100 dark:bg-neutral-800">'+
+    [['pdf','PDF'],['image','Imagen'],['text','Texto']].map(function (m) {
+      return '<button data-m="'+m[0]+'" class="expseg pressable text-sm rounded-lg py-1.5 font-medium">'+m[1]+'</button>';
+    }).join('') + '</div>';
+  const body = '<div>'+
+    segBody +
+    '<div id="expPreview" class="mt-4 rounded-xl overflow-hidden bg-neutral-100 dark:bg-neutral-800 max-h-[52vh] overflow-y-auto"></div>'+
+    '<p id="expNote" class="mt-3 text-xs text-neutral-500 dark:text-neutral-400"></p>'+
+    '<button id="expDownload" class="'+ac().solid+' text-white rounded-lg px-4 py-2.5 font-medium w-full mt-2 inline-flex items-center justify-center gap-2">Descargar</button>'+
+  '</div>';
+  openModal('Exportar tareas', body);
+
+  const segBtns = Array.prototype.slice.call(document.querySelectorAll('#expSeg .expseg'));
+  const dlBtn = document.getElementById('expDownload');
+  const note = document.getElementById('expNote');
+  const NOTES = {
+    pdf: 'Documento PDF tamaño carta, listo para imprimir o compartir.',
+    image: 'Imagen .jpg de una sola página, ideal para enviar por chat.',
+    text: 'Texto plano, sin formato, para pegar donde quieras.',
+  };
+  const LABELS = { pdf: 'Descargar PDF', image: 'Descargar imagen', text: 'Descargar .txt' };
+
+  function paintSeg() {
+    segBtns.forEach(function (b) {
+      const on = b.dataset.m === mode;
+      b.className = 'expseg pressable text-sm rounded-lg py-1.5 font-medium ' +
+        (on ? 'bg-white dark:bg-neutral-900 shadow-sm text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400');
+    });
+    note.textContent = NOTES[mode];
+    dlBtn.textContent = LABELS[mode];
+  }
+  function renderPreview() {
+    const area = document.getElementById('expPreview');
+    if (!area) return;
+    area.innerHTML = '';
+    if (mode === 'text') {
+      area.style.background = '#ffffff';
+      const pre = el('<pre style="margin:0;padding:16px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:#171717;background:#ffffff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"></pre>');
+      pre.textContent = exportText();
+      area.appendChild(pre);
+      return;
+    }
+    area.style.background = '';
+    const wrapper = el('<div style="padding:16px;display:flex;justify-content:center;"></div>');
+    const doc = el(exportDocHtml());
+    const w = Math.max(240, area.clientWidth - 32);
+    const scale = w / 794;
+    doc.style.transformOrigin = 'top left';
+    doc.style.transform = 'scale(' + scale + ')';
+    const scaler = el('<div style="box-shadow:0 6px 28px rgba(0,0,0,0.14);border-radius:4px;overflow:hidden;background:#fff;"></div>');
+    scaler.style.width = w + 'px';
+    scaler.appendChild(doc);
+    wrapper.appendChild(scaler);
+    area.appendChild(wrapper);
+    requestAnimationFrame(function () { scaler.style.height = (doc.offsetHeight * scale) + 'px'; });
+  }
+
+  segBtns.forEach(function (b) {
+    b.addEventListener('click', function () { mode = b.dataset.m; paintSeg(); renderPreview(); });
+  });
+  dlBtn.addEventListener('click', async function () {
+    if (mode === 'text') {
+      downloadBlob(new Blob([exportText()], { type: 'text/plain;charset=utf-8' }), expFilename('txt'));
+      return;
+    }
+    const old = dlBtn.textContent; dlBtn.disabled = true; dlBtn.textContent = 'Generando…';
+    try {
+      const libs = await loadExportLibs();
+      const canvas = await expRenderCanvas(libs.html2canvas);
+      if (mode === 'image') {
+        await new Promise(function (res) { canvas.toBlob(function (b) { if (b) downloadBlob(b, expFilename('jpg')); res(); }, 'image/jpeg', 0.95); });
+      } else {
+        const pdf = new libs.jsPDF('p', 'mm', 'a4');
+        const pw = 210, ph = 297;
+        const imgW = pw, imgH = canvas.height * imgW / canvas.width;
+        const img = canvas.toDataURL('image/jpeg', 0.95);
+        let pos = 0, left = imgH;
+        pdf.addImage(img, 'JPEG', 0, pos, imgW, imgH, '', 'FAST');
+        left -= ph;
+        while (left > 0) { pos -= ph; pdf.addPage(); pdf.addImage(img, 'JPEG', 0, pos, imgW, imgH, '', 'FAST'); left -= ph; }
+        pdf.save(expFilename('pdf'));
+      }
+    } catch (err) {
+      note.textContent = 'No se pudo generar: ' + (err && err.message ? err.message : err);
+    } finally { dlBtn.disabled = false; dlBtn.textContent = old; }
+  });
+
+  paintSeg();
+  renderPreview();
+}
 
 function fmtDue(iso) {
   if (!iso) return 'Sin fecha';
@@ -1016,6 +1272,7 @@ function renderShell() {
           <p class="text-xs text-neutral-500 dark:text-neutral-400">Semana \${esc(rangeText(state.range))}</p>
         </div>
         <div class="flex items-center gap-2">
+          <button id="exportBtn" title="Exportar tareas" class="pressable border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 text-sm rounded-lg px-3 py-2 inline-flex items-center gap-1.5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span class="hidden sm:inline">Exportar</span></button>
           <button id="syncBtn" class="\${a.solid} text-white text-sm rounded-lg px-3 py-2">Sincronizar</button>
           <div id="userbtn"></div>
         </div>
@@ -1036,6 +1293,7 @@ function renderShell() {
   root.appendChild(shell);
   mountUserButton(document.getElementById('userbtn'));
   shell.querySelector('#privacyLink').addEventListener('click', openPrivacy);
+  shell.querySelector('#exportBtn').addEventListener('click', openExportModal);
   shell.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { state.tab = b.dataset.tab; renderTab(); }));
   shell.querySelector('#syncBtn').addEventListener('click', async (e) => {
     const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sincronizando…';
