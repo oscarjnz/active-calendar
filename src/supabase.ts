@@ -227,6 +227,42 @@ export async function setTaskStatus(
   if (error) throw new Error(`tasks.setStatus: ${error.message}`);
 }
 
+/**
+ * Todas las tareas del estudiante (de cualquier semana) que TODAVÍA no tienen
+ * materia asignada. `syncOne` solo deriva materia para las tareas de la
+ * semana actual (filterInRange); las de semanas pasadas o futuras quedan sin
+ * tocar aunque el algoritmo de derivación mejore. Esta función alimenta un
+ * backfill que corre en cada sync para ponerlas al día retroactivamente.
+ */
+export async function listUnclassifiedTasks(
+  sb: SupabaseClient,
+  userId: string,
+): Promise<Array<{ uid: string; summary: string }>> {
+  const { data, error } = await sb
+    .from('tasks')
+    .select('uid, summary')
+    .eq('user_id', userId)
+    .is('course_code', null);
+  if (error) throw new Error(`tasks.listUnclassified: ${error.message}`);
+  return (data ?? []) as Array<{ uid: string; summary: string }>;
+}
+
+/**
+ * Aplica en lote un mapa uid -> course_code (solo toca esa columna; no afecta
+ * status/first_seen/last_seen). Usado por el backfill de materias.
+ */
+export async function bulkSetCourseCodes(
+  sb: SupabaseClient,
+  userId: string,
+  updates: Array<{ uid: string; course_code: string }>,
+): Promise<void> {
+  await Promise.all(
+    updates.map(({ uid, course_code }) =>
+      sb.from('tasks').update({ course_code }).eq('user_id', userId).eq('uid', uid),
+    ),
+  );
+}
+
 /** Asigna manualmente la materia (course_code) de una tarea. null = quitar. */
 export async function setTaskCourse(
   sb: SupabaseClient,
