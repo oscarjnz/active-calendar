@@ -1,5 +1,5 @@
 import type { Env, Profile } from './types';
-import { collectEnrolledCourses, deriveCourseCode, filterInRange, parseIcal } from './ical';
+import { collectEnrolledCourses, deriveCourseCode, deriveCourseCodeByProximity, filterInRange, parseIcal } from './ical';
 import { computeDelta } from './diff';
 import {
   adminClient,
@@ -8,6 +8,7 @@ import {
   ensureProfile,
   getProfile,
   listAllProfilesWithIcal,
+  listClassifiedTasks,
   listWeekTasks,
   markEmailed,
   markTelegramed,
@@ -63,6 +64,22 @@ async function syncOne(
   // Derivar la materia de cada tarea contra las materias matriculadas.
   for (const ev of inWeek) {
     if (!ev.courseCode) ev.courseCode = deriveCourseCode(ev.summary, courses);
+  }
+
+  // 3) Para las que sigan sin materia (títulos genéricos tipo "Laboratorio05",
+  // "Actividad 4"), inferir por cercanía del ID de gradebook con tareas YA
+  // clasificadas del estudiante (de cualquier semana) — ver
+  // deriveCourseCodeByProximity en ical.ts. Se incluyen también las que se
+  // acaban de resolver arriba, para que varias tareas nuevas de una misma
+  // materia se ayuden entre sí en el mismo sync.
+  if (inWeek.some((ev) => !ev.courseCode)) {
+    const classified = await listClassifiedTasks(sb, profile.user_id);
+    for (const ev of inWeek) {
+      if (ev.courseCode) classified.push({ uid: ev.uid, course_code: ev.courseCode });
+    }
+    for (const ev of inWeek) {
+      if (!ev.courseCode) ev.courseCode = deriveCourseCodeByProximity(ev.uid, classified);
+    }
   }
 
   const existingRows = await listWeekTasks(sb, profile.user_id, start, end);

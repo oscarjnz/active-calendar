@@ -141,3 +141,57 @@ export function normalizeCode(raw: string): string {
 export function pensumName(code: string): string | null {
   return BY_CODE.get(normalizeCode(code))?.name ?? null;
 }
+
+/**
+ * Palabras/frases clave por código de materia: tercer nivel de `deriveCourseCode`
+ * (ver ical.ts) para tareas cuyo título no trae ni el código ni el nombre de la
+ * materia (ej. "Actividad 4", "TAREA 15_Analisis de Malware.docx"). Solo se
+ * evalúan contra materias que el estudiante ya tiene matriculadas, así que el
+ * riesgo de falso positivo entre secciones/carreras distintas es bajo.
+ * Todo en minúsculas y sin tildes (el matching normaliza acentos). Preferir
+ * frases o términos técnicos distintivos del tema de la materia; evitar
+ * palabras genéricas ("actividad", "laboratorio", "practica") que colisionan
+ * entre materias.
+ */
+export const COURSE_SIGNALS: Record<string, string[]> = {
+  // Minería y Análisis de Datos
+  TI3316: [
+    'clasificador', 'regresion', 'rendimiento agricola', 'k-means', 'kmeans',
+    'apriori', 'canasta', 'pca', 'dimensionalidad', 'informe interactivo',
+    'avance del proyecto integrador', 'proyecto integrador final',
+    'etica y sesgos', 'segmentacion de clientes',
+  ],
+  // Criptografía (electiva)
+  TI3712: [
+    'criptograf', 'cifrado', 'cifra clasica', 'cifra moderna', 'kerckhoffs',
+    'cifrado de hill', 'openssl', 'iso 27001',
+  ],
+  // Desarrollo de Aplicaciones de Dispositivos Móviles (electiva)
+  TI3701: [
+    'xamarin', 'flutter', 'dart', 'figma', 'kahoot', 'widgets', 'mvvm',
+    'hive', 'apis y transicion', 'local storage',
+  ],
+  // Sistemas Operativos
+  TI3326: [
+    'kernel linux', 'expresiones regulares', 'regex', 'active directory',
+    'gestion de procesos', 'sistemas de archivos', 'programacion shell',
+    'editor vi', 'renice',
+  ],
+  // Arquitectura de Software
+  TI3315: ['patrones de diseno', 'mapa conceptual', 'software comercial'],
+  // Proyecto Integrador II
+  TI3631: [
+    'interconexiones seguras', 'gestion agil del proyecto',
+    'plan de despliegue de infraestructura', 'primer prototipo funcional',
+    'reflexion individual de mitad de ciclo', 'formulario de aceptacion',
+  ],
+  // Diseño y Planificación de Redes
+  TI3325: ['switches', 'red jerarquica', 'conectividad wan', 'data center'],
+  // Programación Paralela y Distribuida (electiva)
+  TI3711: [
+    'openmp', 'mpi', 'cuda', 'hadoop', 'mapreduce', 'apache spark',
+    'paxos', 'raft', 'consenso distribuido', 'modelo de actores',
+  ],
+  // Malware y Vulnerabilidades (electiva)
+  TI3702: ['analisis de malware', 'malware'],
+};
