@@ -3,7 +3,18 @@
 // LAST-MODIFIED, CATEGORIES, DESCRIPTION. Maneja line unfolding y escapes.
 
 import type { Course, IcalEvent } from './types';
-import { normalizeCode, pensumName } from './pensum';
+import { COURSE_SIGNALS, normalizeCode, pensumName } from './pensum';
+
+/** Minúsculas y sin tildes, para matching tolerante a acentos. */
+function foldText(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+/** True si `needle` aparece en `hay` como palabra/frase completa (no substring suelto). */
+function containsWord(hay: string, needle: string): boolean {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(hay);
+}
 
 /** Une lineas plegadas (continuacion empieza con espacio o tab). */
 function unfold(raw: string): string[] {
@@ -134,6 +145,73 @@ export function deriveCourseCode(summary: string, courses: Course[]): string | n
     const name = c.name.toLowerCase();
     if (name.length >= 4 && hay.includes(name)) return c.code;
   }
+  // Tercer nivel: palabras/frases clave por materia (COURSE_SIGNALS), para
+  // tareas cuyo título es genérico ("Actividad 4", "TAREA 15_Analisis de
+  // Malware.docx") y no menciona ni el código ni el nombre de la materia.
+  const folded = foldText(summary);
+  for (const c of courses) {
+    const signals = COURSE_SIGNALS[c.code];
+    if (!signals) continue;
+    if (signals.some((kw) => containsWord(folded, foldText(kw)))) return c.code;
+  }
+  return null;
+}
+
+/**
+ * Extrae el ID numérico del "gradebook item" del UID de una tarea de
+ * Blackboard (ej. "_blackboard.platform.gradebook2.GradableItem-_870039_1"
+ * -> 870039), o null si el UID no sigue ese patrón (ej. sesiones de clase).
+ */
+export function extractGradebookId(uid: string): number | null {
+  const m = uid.match(/_(\d+)_\d+$/);
+  return m && m[1] ? parseInt(m[1], 10) : null;
+}
+
+// Umbral de distancia (en ID) para aceptar un solo vecino clasificado (sin
+// "bracket" por ambos lados). Los saltos de ID entre materias distintas suelen
+// ser de decenas/cientos, pero se han visto tan chicos como 10 entre bloques
+// contiguos de materias distintas, así que este valor se mantiene conservador.
+const GRADEBOOK_NEAR_GAP = 8;
+
+// Span máximo (antes -> después) para confiar en un "bracket" (ambos vecinos
+// coinciden en materia). Materias cuyo profesor agrega entregas una por
+// semana (en vez de crear todo el gradebook de una vez) dejan huecos enormes
+// entre sus propios ítems (~2500 visto en datos reales); un ítem de OTRA
+// materia agregado en ese hueco no debe heredar la materia solo por caer en
+// medio de dos puntos lejanos que coinciden por casualidad.
+const GRADEBOOK_BRACKET_SPAN = 60;
+
+/**
+ * Cuarto nivel de derivación (no forma parte de `deriveCourseCode`: se aplica
+ * después, solo a las tareas que sigan sin materia). Blackboard asigna los IDs
+ * de "gradebook item" en bloques contiguos por materia (se crean juntos cuando
+ * el profesor arma su gradebook), así que una tarea sin señal de texto que cae
+ * ENTRE dos tareas ya clasificadas (manual o automáticamente, de cualquier
+ * semana) de la MISMA materia casi seguro pertenece a esa materia. Si solo hay
+ * un vecino clasificado a un lado (inicio/fin del rango conocido), se exige
+ * que esté muy cerca para reducir falsos positivos con el bloque de la
+ * materia vecina (los bloques de materias distintas pueden quedar a solo ~10
+ * de distancia entre sí).
+ */
+export function deriveCourseCodeByProximity(
+  uid: string,
+  classified: Array<{ uid: string; course_code: string }>,
+): string | null {
+  const id = extractGradebookId(uid);
+  if (id === null) return null;
+  let before: { id: number; code: string } | null = null;
+  let after: { id: number; code: string } | null = null;
+  for (const t of classified) {
+    const tid = extractGradebookId(t.uid);
+    if (tid === null || tid === id) continue;
+    if (tid < id && (before === null || tid > before.id)) before = { id: tid, code: t.course_code };
+    if (tid > id && (after === null || tid < after.id)) after = { id: tid, code: t.course_code };
+  }
+  if (before && after && before.code === after.code && after.id - before.id <= GRADEBOOK_BRACKET_SPAN) {
+    return before.code;
+  }
+  if (before && (!after || id - before.id < after.id - id) && id - before.id <= GRADEBOOK_NEAR_GAP) return before.code;
+  if (after && (!before || after.id - id < id - before.id) && after.id - id <= GRADEBOOK_NEAR_GAP) return after.code;
   return null;
 }
 

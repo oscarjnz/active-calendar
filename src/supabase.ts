@@ -157,6 +157,26 @@ export async function listWeekTasks(
   return (data ?? []) as TaskRow[];
 }
 
+/**
+ * Todas las tareas del estudiante (de cualquier semana) que ya tienen materia
+ * asignada (manual o derivada). Sirve de historial para el cuarto nivel de
+ * derivación por cercanía de ID de gradebook (`deriveCourseCodeByProximity`
+ * en ical.ts): mientras más tareas clasificadas haya, mejor infiere las
+ * genéricas nuevas.
+ */
+export async function listClassifiedTasks(
+  sb: SupabaseClient,
+  userId: string,
+): Promise<Array<{ uid: string; course_code: string }>> {
+  const { data, error } = await sb
+    .from('tasks')
+    .select('uid, course_code')
+    .eq('user_id', userId)
+    .not('course_code', 'is', null);
+  if (error) throw new Error(`tasks.listClassified: ${error.message}`);
+  return (data ?? []) as Array<{ uid: string; course_code: string }>;
+}
+
 export async function upsertEvents(
   sb: SupabaseClient,
   userId: string,
