@@ -3,12 +3,14 @@ import { collectEnrolledCourses, deriveCourseCode, deriveCourseCodeByProximity, 
 import { computeDelta } from './diff';
 import {
   adminClient,
+  bulkSetCourseCodes,
   cleanupProfileCourses,
   clearTelegram,
   ensureProfile,
   getProfile,
   listAllProfilesWithIcal,
   listClassifiedTasks,
+  listUnclassifiedTasks,
   listWeekTasks,
   markEmailed,
   markTelegramed,
@@ -39,6 +41,42 @@ async function fetchIcal(url: string): Promise<string> {
   const res = await fetch(url, { cf: { cacheTtl: 0 } });
   if (!res.ok) throw new Error(`ical fetch ${res.status}`);
   return await res.text();
+}
+
+/**
+ * Backfill: `syncOne` solo deriva materia para las tareas de la semana
+ * actual, así que las de semanas pasadas/futuras (ya guardadas, sincronizadas
+ * antes de que existiera esta derivación o antes de que el estudiante
+ * agregara la materia a su perfil) se quedarían sin materia para siempre. Esta
+ * función corre en cada sync y aplica los 4 niveles de derivación a TODAS las
+ * tareas sin materia del estudiante (de cualquier semana), usando su
+ * `summary` ya guardado (no hace falta el feed). Solo toca `course_code`.
+ */
+async function backfillCourseCodes(
+  sb: ReturnType<typeof adminClient>,
+  userId: string,
+  courses: Profile['courses'],
+): Promise<number> {
+  const unclassified = await listUnclassifiedTasks(sb, userId);
+  if (unclassified.length === 0) return 0;
+
+  const resolved: Array<{ uid: string; course_code: string }> = [];
+  for (const t of unclassified) {
+    const code = deriveCourseCode(t.summary, courses);
+    if (code) resolved.push({ uid: t.uid, course_code: code });
+  }
+
+  const stillUnresolved = unclassified.filter((t) => !resolved.some((r) => r.uid === t.uid));
+  if (stillUnresolved.length > 0) {
+    const classified = [...(await listClassifiedTasks(sb, userId)), ...resolved];
+    for (const t of stillUnresolved) {
+      const code = deriveCourseCodeByProximity(t.uid, classified);
+      if (code) resolved.push({ uid: t.uid, course_code: code });
+    }
+  }
+
+  if (resolved.length > 0) await bulkSetCourseCodes(sb, userId, resolved);
+  return resolved.length;
 }
 
 async function syncOne(
@@ -86,6 +124,10 @@ async function syncOne(
   const existing = new Map(existingRows.map((r) => [r.uid, r]));
   const delta = computeDelta(inWeek, existing);
   await upsertEvents(sb, profile.user_id, inWeek, existing);
+
+  // 4) Backfill: pone al día las tareas de OTRAS semanas que se quedaron sin
+  // materia por syncs anteriores (ver backfillCourseCodes arriba).
+  await backfillCourseCodes(sb, profile.user_id, courses);
 
   return { weekCount: inWeek.length, created: delta.created.length, modified: delta.modified.length };
 }
