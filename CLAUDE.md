@@ -35,6 +35,9 @@ iCal de Blackboard.
   usuario.
 - `email.ts` / `telegram.ts` — envío de recordatorios semanales por cada canal.
 - `html.ts` — genera el HTML/CSS/JS del SPA (sin framework, se sirve inline desde el Worker).
+  Incluye el botón **Exportar** (100% cliente, sin endpoint en el Worker): renderiza la
+  semana a un `<canvas>` fuera de pantalla con `html2canvas` (cargado por CDN vía
+  `loadExportLibs`) y exporta a PDF (`jsPDF`), imagen `.jpg` o texto plano (`exportText`).
 
 ## Cómo se asigna la materia a una tarea (`deriveCourseCode`, en `ical.ts`)
 
@@ -70,6 +73,27 @@ Al agregar soporte para una materia electiva nueva o mejorar el matching, extend
 `COURSE_SIGNALS` en `pensum.ts` es el lugar correcto — usar frases/palabras razonablemente
 distintivas (evitar términos genéricos tipo "actividad" o "laboratorio" que colisionan entre
 materias) y sin tildes (el matching normaliza acentos).
+
+### Backfill de tareas de otras semanas (`backfillCourseCodes`, en `index.ts`)
+
+**Importante:** `syncOne` solo pasa por los 3 niveles de `deriveCourseCode` (y el nivel 4 con
+las tareas de la propia semana) para las tareas de la **semana académica actual**
+(`filterInRange`). Las tareas de semanas pasadas o futuras, una vez guardadas, no se vuelven a
+tocar en syncs normales — así que si el algoritmo de derivación mejora (o el estudiante recién
+agrega una materia a su perfil), esas tareas viejas se quedarían con `course_code = null` para
+siempre. Por eso, al final de cada `syncOne`, `backfillCourseCodes` corre sobre **todas** las
+tareas sin materia del estudiante (cualquier semana, vía `listUnclassifiedTasks` en
+`supabase.ts`) y les aplica los 4 niveles usando el `summary` ya guardado (no necesita
+refetch del feed). Solo escribe la columna `course_code` (`bulkSetCourseCodes`); nunca toca
+`status`, `first_seen` ni `last_seen`. Es idempotente y barato (solo hace algo si hay filas con
+`course_code IS NULL`), así que es seguro que corra en cada sync, incluido el cron 3×/día.
+
+Con un feed real de ejemplo (85 tareas de 9 materias, cuatrimestre 2026-3): el pipeline de 4
+niveles + backfill resolvió 66/85 (78%) sin falsos positivos verificados a mano. Las 19
+restantes eran de dos materias (Sistemas Operativos, Criptografía) cuyos títulos de tarea no
+traen ninguna palabra clave posible (ej. "Laboratorio05", "actividad 2") — esas necesitan que
+el estudiante clasifique manualmente la primera tarea de esa materia para darle una "semilla"
+al nivel 4; el resto de esa materia se autoasigna solo en el siguiente sync.
 
 ## Cómo correr / testear
 
