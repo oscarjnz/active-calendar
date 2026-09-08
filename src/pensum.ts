@@ -213,6 +213,17 @@ export const COURSE_SIGNALS: Record<string, string[]> = {
   ],
   // Malware y Vulnerabilidades (electiva)
   TI3702: ['analisis de malware', 'malware'],
+  // Ingeniería de Factores Humanos
+  TI3410: [
+    'factores humanos', 'ifh', 'practica colaborativa de ifh',
+    'diseno centrado en el usuario', 'evaluacion dcu', 'modelado de usuario',
+    'investigacion de usuarios', 'modelado del comportamiento',
+    'requerimiento de usabilidad', 'prototipado baja fidelidad',
+    'pruebas de usabilidad', 'ley de fitts', 'goms',
+    'clasificacion de errores y automatizacion',
+    'canales multimedia en la interaccion', 'interfaces multimodales',
+    'computacion afectiva', 'cscw', 'desing thinking',
+  ],
 };
 
 /**
