@@ -1,6 +1,6 @@
 import type { Env } from './types';
 import { PENSUM, PREREQS } from './pensum';
-import { currentAcademicWeek, currentRecesoId } from './time';
+import { currentAcademicWeek, currentBlockId } from './time';
 
 /** SPA servida por el Worker. Login con Clerk; datos vía el API del Worker. */
 export function renderApp(env: Env): string {
@@ -14,8 +14,11 @@ export function renderApp(env: Env): string {
   const week = JSON.stringify(currentAcademicWeek());
   // Prerequisitos por materia (para las advertencias del wizard de cambio de cuatrimestre).
   const prereqs = JSON.stringify(PREREQS);
-  // Id del receso actual (null si no estamos en receso): dispara el wizard de cambio de cuatrimestre.
-  const receso = JSON.stringify(currentRecesoId());
+  // Id del bloque calendario actual: dispara el wizard de cambio de cuatrimestre cuando no
+  // coincide con profile.term_block_id, sin depender de una ventana de receso angosta (el
+  // estudiante puede entrar recién empezado el bloque nuevo y de todas formas hay que
+  // preguntarle).
+  const blockId = JSON.stringify(currentBlockId());
 
   return `<!DOCTYPE html>
 <!--
@@ -90,7 +93,7 @@ export function renderApp(env: Env): string {
 <body class="h-full overflow-x-hidden bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
 <div id="root" class="min-h-full"></div>
 
-<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week}; window.__PREREQS__ = ${prereqs}; window.__RECESO__ = ${receso};</script>
+<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week}; window.__PREREQS__ = ${prereqs}; window.__BLOCKID__ = ${blockId};</script>
 <script type="module">
 import { Clerk } from 'https://esm.sh/@clerk/clerk-js@5';
 
@@ -102,7 +105,7 @@ const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem, elective, concen
 const PENSUM_BY_CODE = new Map(PENSUM.map(c => [c.code, c]));
 const WEEK = window.__WEEK__ || null;
 const PREREQS = window.__PREREQS__ || {};
-const RECESO = window.__RECESO__ || null;
+const BLOCKID = window.__BLOCKID__ || null;
 function normCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 // true si \`completed\` (Set de códigos normalizados) satisface el prerequisito de \`code\`.
 // Sin entrada en PREREQS = sin prereq documentado = satisfecho (nunca bloquea, solo advierte).
@@ -853,7 +856,7 @@ function termWizardStep3(failed) {
         term,
         courses: [...prefill.values()],
         completed_courses: [...completedNew],
-        term_wizard_resolved_for: RECESO,
+        term_block_id: BLOCKID,
       }) });
       state.profile = r.profile;
       const overlay = document.querySelector('.app-modal');
@@ -863,12 +866,16 @@ function termWizardStep3(failed) {
   });
 }
 
-// Banner automático: solo si hay cuatrimestre elegido, estamos en receso y ese
-// receso todavía no fue resuelto (avanzó o confirmó que no había terminado).
+// Banner automático: si hay cuatrimestre elegido y el bloque calendario actual no coincide
+// con el último bloque para el que se confirmó term/courses (onboarding, Ajustes o este
+// mismo wizard). A propósito NO depende de "estar en receso": para cuando el estudiante
+// entra a la app, el bloque nuevo casi siempre ya empezó, y de todas formas hay que
+// preguntarle (si dependiera del receso, la ventana angosta ya habría pasado y nunca se
+// le preguntaría nada, ni a un estudiante nuevo en el sistema ni a uno viejo).
 function shouldShowTermWizardBanner() {
   const p = state.profile;
-  if (!p || !p.term || !RECESO || wizardBannerDismissed) return false;
-  return p.term_wizard_resolved_for !== RECESO;
+  if (!p || !p.term || wizardBannerDismissed) return false;
+  return p.term_block_id !== BLOCKID;
 }
 function termWizardBanner() {
   const p = state.profile;
@@ -916,7 +923,7 @@ function renderCourseSetup() {
     const term = parseInt(picker.querySelector('#termSel').value, 10) || null;
     msg.textContent = 'Guardando…';
     try {
-      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ term, courses: [...selected.values()] }) });
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ term, courses: [...selected.values()], term_block_id: BLOCKID }) });
       state.profile = r.profile;
       renderShell();
     } catch (e) { msg.textContent = 'Error: ' + e.message; }
@@ -1229,7 +1236,7 @@ function renderAjustes(node) {
     cmsg.textContent = 'Guardando…';
     try {
       const term = parseInt(picker.querySelector('#termSel').value, 10) || null;
-      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ term, courses: [...selected.values()] }) });
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ term, courses: [...selected.values()], term_block_id: BLOCKID }) });
       state.profile = r.profile;
       cmsg.textContent = 'Materias guardadas.';
       renderTab();

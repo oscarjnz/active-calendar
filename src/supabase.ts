@@ -48,7 +48,7 @@ export async function ensureProfile(
     term: null,
     courses: [],
     completed_courses: [],
-    term_wizard_resolved_for: null,
+    term_block_id: null,
   };
   const { data, error } = await sb.from('profiles').insert(row).select('*').single();
   if (error) throw new Error(`profiles.insert: ${error.message}`);
@@ -101,7 +101,7 @@ export async function updateProfile(
     notify_time?: string;
     telegram_notify?: boolean;
     completed_courses?: string[];
-    term_wizard_resolved_for?: string | null;
+    term_block_id?: string | null;
   },
 ): Promise<Profile> {
   const patch: Record<string, unknown> = {};
@@ -132,8 +132,8 @@ export async function updateProfile(
     const list = Array.isArray(fields.completed_courses) ? fields.completed_courses : [];
     patch.completed_courses = [...new Set(list.map((c) => normalizeCode(String(c))).filter(Boolean))];
   }
-  if ('term_wizard_resolved_for' in fields) {
-    patch.term_wizard_resolved_for = fields.term_wizard_resolved_for?.trim() || null;
+  if ('term_block_id' in fields) {
+    patch.term_block_id = fields.term_block_id?.trim() || null;
   }
   const { data, error } = await sb
     .from('profiles')
