@@ -27,6 +27,8 @@ create table profiles (
   telegram_notify boolean not null default false, -- recibir recordatorio semanal por Telegram
   telegram_link_code text,                  -- código temporal de un solo uso para vincular
   last_telegram timestamptz,                -- último mensaje de Telegram (anti-duplicados)
+  completed_courses jsonb not null default '[]'::jsonb, -- códigos de materias ya aprobadas (acumulado entre cuatrimestres)
+  term_wizard_resolved_for text,            -- id de receso ("YYYY-B") ya resuelto por el wizard de cambio de cuatrimestre
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -89,6 +91,8 @@ alter table profiles add column if not exists telegram_notify boolean not null d
 alter table profiles add column if not exists telegram_link_code text;
 alter table profiles add column if not exists last_telegram timestamptz;
 alter table tasks add column if not exists course_code text;
+alter table profiles add column if not exists completed_courses jsonb not null default '[]'::jsonb;
+alter table profiles add column if not exists term_wizard_resolved_for text;
 create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
 create index if not exists idx_profiles_tg_code on profiles(telegram_link_code) where telegram_link_code is not null;
 create index if not exists idx_profiles_notify on profiles(notify_dow) where email_notify or telegram_notify;
