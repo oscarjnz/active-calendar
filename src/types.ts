@@ -53,7 +53,7 @@ export interface Profile {
   telegram_link_code: string | null; // código temporal de un solo uso para vincular
   last_telegram: string | null; // ISO del último mensaje de Telegram (anti-duplicados)
   completed_courses: string[]; // códigos de materias ya aprobadas (acumulado entre cuatrimestres)
-  term_wizard_resolved_for: string | null; // id de receso ("YYYY-B") ya resuelto por el wizard de cambio de cuatrimestre
+  term_block_id: string | null; // id de bloque ("YYYY-B") para el que term/courses ya está al día
   created_at: string;
   updated_at: string;
 }

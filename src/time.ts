@@ -124,15 +124,15 @@ export function isMorningWindowSdq(now: Date = new Date()): boolean {
   return h >= 6 && h <= 8;
 }
 
-/** Id estable del receso actual ("YYYY-B", bloque que empieza al salir del receso), o null
- *  si no estamos en receso. Sirve para no repetir el wizard de cambio de cuatrimestre más
- *  de una vez por receso. */
-export function currentRecesoId(now: Date = new Date()): string | null {
-  const week = currentAcademicWeek(now);
-  if (week.week !== null) return null;
-  // bloque siguiente al actual (1->2->3->1, con año+1 al pasar de 3 a 1)
+/**
+ * Id estable del bloque/cuatrimestre calendario actual ("YYYY-B"). A diferencia de la
+ * ventana de receso (que dura solo unos días entre bloques), este id está definido siempre
+ * y cambia exactamente al cruzar Sep/Ene/May. Sirve para detectar que el `term` guardado en
+ * el perfil quedó desactualizado, sin depender de que el estudiante entre justo durante el
+ * receso: si entra ya empezado el bloque nuevo (lo más común), igual hay que preguntarle.
+ */
+export function currentBlockId(now: Date = new Date()): string {
+  const { block } = currentAcademicWeek(now);
   const p = toSdqParts(now);
-  const nextBlock = ((week.block % 3) + 1) as 1 | 2 | 3;
-  const nextYear = week.block === 3 ? p.year + 1 : p.year;
-  return `${nextYear}-${nextBlock}`;
+  return `${p.year}-${block}`;
 }
