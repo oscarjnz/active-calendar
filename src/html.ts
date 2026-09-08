@@ -1,6 +1,6 @@
 import type { Env } from './types';
-import { PENSUM } from './pensum';
-import { currentAcademicWeek } from './time';
+import { PENSUM, PREREQS } from './pensum';
+import { currentAcademicWeek, currentRecesoId } from './time';
 
 /** SPA servida por el Worker. Login con Clerk; datos vía el API del Worker. */
 export function renderApp(env: Env): string {
@@ -12,6 +12,10 @@ export function renderApp(env: Env): string {
   const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem, c.elective ? 1 : 0, c.concentration || '']));
   // Semana académica (bloque + 1-15) calculada server-side con la fecha actual.
   const week = JSON.stringify(currentAcademicWeek());
+  // Prerequisitos por materia (para las advertencias del wizard de cambio de cuatrimestre).
+  const prereqs = JSON.stringify(PREREQS);
+  // Id del receso actual (null si no estamos en receso): dispara el wizard de cambio de cuatrimestre.
+  const receso = JSON.stringify(currentRecesoId());
 
   return `<!DOCTYPE html>
 <!--
@@ -86,7 +90,7 @@ export function renderApp(env: Env): string {
 <body class="h-full overflow-x-hidden bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
 <div id="root" class="min-h-full"></div>
 
-<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week};</script>
+<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week}; window.__PREREQS__ = ${prereqs}; window.__RECESO__ = ${receso};</script>
 <script type="module">
 import { Clerk } from 'https://esm.sh/@clerk/clerk-js@5';
 
@@ -97,7 +101,25 @@ const root = document.getElementById('root');
 const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem, elective, concentration]) => ({ code, name, sem, elective: !!elective, concentration: concentration || '' }));
 const PENSUM_BY_CODE = new Map(PENSUM.map(c => [c.code, c]));
 const WEEK = window.__WEEK__ || null;
+const PREREQS = window.__PREREQS__ || {};
+const RECESO = window.__RECESO__ || null;
 function normCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+// true si \`completed\` (Set de códigos normalizados) satisface el prerequisito de \`code\`.
+// Sin entrada en PREREQS = sin prereq documentado = satisfecho (nunca bloquea, solo advierte).
+function prereqSatisfied(code, completed) {
+  const groups = PREREQS[normCode(code)];
+  if (!groups) return true;
+  return groups.every(g => g.some(alt => completed.has(normCode(alt))));
+}
+// Alternativas (OR) que faltan por completar del prerequisito de \`code\`, como nombres
+// legibles, para el tooltip del badge de advertencia en el picker.
+function missingPrereqGroups(code, completed) {
+  const groups = PREREQS[normCode(code)];
+  if (!groups) return [];
+  return groups
+    .filter(g => !g.some(alt => completed.has(normCode(alt))))
+    .map(g => g.map(alt => courseName(alt) || alt).join(' o '));
+}
 // Nombre legible de una materia por código: perfil > pensum > el propio código.
 function courseName(code) {
   if (!code) return null;
@@ -517,6 +539,10 @@ function rangeText(r) {
 // ---------- estado + API ----------
 const clerk = new Clerk(cfg.CLERK_PUBLISHABLE_KEY);
 const state = { profile: null, tasks: [], range: null, tab: 'resumen', filter: 'all' };
+// "Ahora no" del banner de cambio de cuatrimestre no persiste nada: solo evita
+// que el banner reaparezca en cada renderShell() de esta misma carga de página.
+// En la próxima carga completa (nueva sesión de loadAndRender) puede reaparecer.
+let wizardBannerDismissed = false;
 
 async function api(path, opts = {}) {
   const token = await clerk.session.getToken();
@@ -615,7 +641,10 @@ function mountUserButton(node) {
 // ---------- render: selección de cuatrimestre + materias ----------
 // Devuelve un elemento reutilizable con el selector de cuatrimestre y los chips
 // de materias. \`selected\` es un Map(code -> {code,name}) que se muta in-place.
-function coursePicker(selected, initialTerm) {
+// \`completed\` (opcional) es un Set de códigos ya aprobados: si viene, cada chip
+// muestra un badge de advertencia (nunca deshabilita ni oculta) cuando su
+// prerequisito no está satisfecho.
+function coursePicker(selected, initialTerm, completed) {
   const a = ac();
   // Si el estudiante ya tiene seleccionadas materias de otro cuatrimestre o
   // electivas, abrimos la sección avanzada de entrada.
@@ -679,7 +708,10 @@ function coursePicker(selected, initialTerm) {
   }
   function makeChip(c, redraw) {
     const on = selected.has(c.code);
-    const chip = el('<button type="button" class="'+chipClass(on)+'">'+esc(fmtCourse(c.code, c.name))+'</button>');
+    const warn = completed && !prereqSatisfied(c.code, completed);
+    const title = warn ? 'Prerequisito pendiente: ' + missingPrereqGroups(c.code, completed).join(', ') : '';
+    const badge = warn ? ' <span aria-hidden="true">⚠</span>' : '';
+    const chip = el('<button type="button" class="'+chipClass(on)+'"'+(title?' title="'+esc(title)+'"':'')+'>'+esc(fmtCourse(c.code, c.name))+badge+'</button>');
     chip.addEventListener('click', () => {
       if (selected.has(c.code)) selected.delete(c.code); else selected.set(c.code, c);
       redraw(); updateCount();
@@ -735,6 +767,123 @@ function coursePicker(selected, initialTerm) {
   });
   drawAll();
   return wrap;
+}
+
+// ---------- wizard: cambio de cuatrimestre ----------
+// Bootstrap de completed_courses cuando el perfil todavía no tiene ninguna:
+// todas las materias OBLIGATORIAS (no electivas) del pensum con sem < term.
+// No adivina electivas de cuatrimestres pasados (hueco conocido y aceptado).
+function bootstrapCompleted(profile) {
+  const set = new Set();
+  const term = profile.term;
+  if (!term) return set;
+  for (const c of PENSUM) {
+    if (!c.elective && c.sem < term) set.add(normCode(c.code));
+  }
+  return set;
+}
+
+// Paso 2: ¿dejaste/reprobaste alguna materia del cuatrimestre que termina?
+function termWizardStep2() {
+  const p = state.profile;
+  const courses = (p.courses || []).slice().sort((x,y) => x.name.localeCompare(y.name, 'es'));
+  const rows = courses.length
+    ? courses.map(c => '<label class="flex items-center gap-2 text-sm cursor-pointer select-none py-1">'+
+        '<input type="checkbox" data-code="'+esc(normCode(c.code))+'" class="wzFail rounded border-neutral-300 dark:border-neutral-600 focus:ring-0" />'+
+        '<span>'+esc(fmtCourse(c.code, c.name))+'</span></label>').join('')
+    : '<p class="text-sm text-neutral-500 dark:text-neutral-400">No tienes materias registradas este cuatrimestre.</p>';
+  const body = '<div class="space-y-4">' +
+    '<p class="text-sm text-neutral-600 dark:text-neutral-300">¿Dejaste, reprobaste, o te falta algún prerequisito pendiente en alguna de estas materias de '+
+      (p.term ? 'cuatrimestre ' + p.term : 'este cuatrimestre') + '?</p>' +
+    '<div id="wzList" class="space-y-1">' + rows + '</div>' +
+    '<button id="wzNone" type="button" class="text-sm underline decoration-dotted hover:decoration-solid text-neutral-500 dark:text-neutral-400">No, aprobé todas</button>' +
+    '<div class="flex justify-end"><button id="wzContinue" class="' + ac().solid + ' text-white rounded-lg px-4 py-2 font-medium">Continuar</button></div>' +
+  '</div>';
+  openModal('Materias de este cuatrimestre', body);
+  const boxes = Array.prototype.slice.call(document.querySelectorAll('.wzFail'));
+  const noneBtn = document.getElementById('wzNone');
+  if (noneBtn) noneBtn.addEventListener('click', () => { boxes.forEach(b => { b.checked = false; }); });
+  document.getElementById('wzContinue').addEventListener('click', () => {
+    const failed = new Set(boxes.filter(b => b.checked).map(b => b.dataset.code));
+    termWizardStep3(failed);
+  });
+}
+
+// Paso 3: picker reutilizado (prereq-aware) con las materias del próximo cuatrimestre.
+function termWizardStep3(failed) {
+  const p = state.profile;
+  const completedNew = new Set(
+    p.completed_courses && p.completed_courses.length
+      ? p.completed_courses.map(normCode)
+      : [...bootstrapCompleted(p)],
+  );
+  for (const c of (p.courses || [])) {
+    const code = normCode(c.code);
+    if (!failed.has(code)) completedNew.add(code);
+  }
+  const newTerm = (p.term || 0) + 1;
+  const graduating = newTerm > 12;
+  // El selector de cuatrimestre del picker solo tiene opciones 1-12; si el
+  // próximo cuatrimestre las excede, se clampea a 12 para no romperlo (el
+  // estudiante puede ajustarlo a mano si aplica).
+  const pickerTerm = Math.min(newTerm, 12);
+
+  const prefill = new Map();
+  if (!graduating) {
+    for (const c of PENSUM.filter(x => x.sem === newTerm && !x.elective)) prefill.set(c.code, { code: c.code, name: c.name });
+  }
+  for (const code of failed) prefill.set(code, { code, name: courseName(code) || code });
+
+  const body = '<div class="space-y-4">' +
+    (graduating
+      ? '<p class="text-sm text-neutral-600 dark:text-neutral-300">Ya casi terminas la malla: el pensum no tiene un cuatrimestre ' + newTerm + '. Si te queda alguna materia pendiente de repetir, selecciónala abajo.</p>'
+      : '<p class="text-sm text-neutral-600 dark:text-neutral-300">Materias sugeridas para el cuatrimestre ' + newTerm + '. Ajusta lo que necesites.</p>') +
+    '<div id="wzPickerSlot"></div>' +
+    '<div class="flex items-center gap-3"><button id="wzSave" class="' + ac().solid + ' text-white rounded-lg px-4 py-2 font-medium">Guardar</button><span id="wzMsg" class="text-sm text-neutral-500 dark:text-neutral-400"></span></div>' +
+  '</div>';
+  openModal('¿Qué llevas el próximo cuatrimestre?', body);
+  const picker = coursePicker(prefill, pickerTerm, completedNew);
+  document.getElementById('wzPickerSlot').appendChild(picker);
+  document.getElementById('wzSave').addEventListener('click', async () => {
+    const msg = document.getElementById('wzMsg');
+    msg.textContent = 'Guardando…';
+    try {
+      const term = parseInt(picker.querySelector('#termSel').value, 10) || pickerTerm;
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({
+        term,
+        courses: [...prefill.values()],
+        completed_courses: [...completedNew],
+        term_wizard_resolved_for: RECESO,
+      }) });
+      state.profile = r.profile;
+      const overlay = document.querySelector('.app-modal');
+      if (overlay) overlay.remove();
+      renderShell();
+    } catch (e) { msg.textContent = 'Error: ' + e.message; }
+  });
+}
+
+// Banner automático: solo si hay cuatrimestre elegido, estamos en receso y ese
+// receso todavía no fue resuelto (avanzó o confirmó que no había terminado).
+function shouldShowTermWizardBanner() {
+  const p = state.profile;
+  if (!p || !p.term || !RECESO || wizardBannerDismissed) return false;
+  return p.term_wizard_resolved_for !== RECESO;
+}
+function termWizardBanner() {
+  const p = state.profile;
+  const bar = el(\`
+    <div class="fade-in mb-4 flex flex-wrap items-center gap-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl px-4 py-3">
+      <span class="text-sm text-amber-900 dark:text-amber-200">¿Terminaste el cuatrimestre \${esc(String(p.term))}?</span>
+      <div class="flex items-center gap-2 ml-auto">
+        <button id="wzYes" class="pressable bg-amber-600 hover:bg-amber-700 text-white text-sm rounded-lg px-3 py-1.5 font-medium">Sí</button>
+        <button id="wzNo" class="pressable text-sm text-amber-800 dark:text-amber-300 underline decoration-dotted hover:decoration-solid">Ahora no</button>
+      </div>
+    </div>
+  \`);
+  bar.querySelector('#wzYes').addEventListener('click', () => { bar.remove(); termWizardStep2(); });
+  bar.querySelector('#wzNo').addEventListener('click', () => { wizardBannerDismissed = true; bar.remove(); });
+  return bar;
 }
 
 function renderCourseSetup() {
@@ -1042,9 +1191,12 @@ function renderAjustes(node) {
         </div>
       </div>
       <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
           <h3 class="font-medium">Cuatrimestre y materias</h3>
-          <button id="saveCourses" class="\${a.solid} text-white text-sm rounded-lg px-3 py-1.5">Guardar materias</button>
+          <div class="flex items-center gap-2">
+            <button id="termWizardBtn" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 text-sm rounded-lg px-3 py-1.5">Cambié de cuatrimestre</button>
+            <button id="saveCourses" class="\${a.solid} text-white text-sm rounded-lg px-3 py-1.5">Guardar materias</button>
+          </div>
         </div>
         <div id="pickerSlot"></div>
         <span id="cmsg" class="text-xs text-neutral-500 dark:text-neutral-400"></span>
@@ -1070,6 +1222,7 @@ function renderAjustes(node) {
   const selected = new Map((p.courses || []).map(c => [normCode(c.code), { code: normCode(c.code), name: c.name }]));
   const picker = coursePicker(selected, p.term || null);
   card.querySelector('#pickerSlot').appendChild(picker);
+  card.querySelector('#termWizardBtn').addEventListener('click', () => termWizardStep2());
   card.querySelector('#saveCourses').addEventListener('click', async (e) => {
     const cmsg = card.querySelector('#cmsg');
     const btn = e.currentTarget; btn.disabled = true;
@@ -1277,6 +1430,7 @@ function renderShell() {
           <div id="userbtn"></div>
         </div>
       </header>
+      <div id="wzBanner"></div>
       <nav class="flex gap-1 mb-4 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-1 w-full overflow-x-auto">
         \${TABS.map(([k,l]) => '<button data-tab="'+k+'" class="tabbtn px-3 py-2 text-sm rounded-lg whitespace-nowrap">'+l+'</button>').join('')}
       </nav>
@@ -1292,6 +1446,7 @@ function renderShell() {
   \`);
   root.appendChild(shell);
   mountUserButton(document.getElementById('userbtn'));
+  if (shouldShowTermWizardBanner()) shell.querySelector('#wzBanner').appendChild(termWizardBanner());
   shell.querySelector('#privacyLink').addEventListener('click', openPrivacy);
   shell.querySelector('#exportBtn').addEventListener('click', openExportModal);
   shell.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { state.tab = b.dataset.tab; renderTab(); }));

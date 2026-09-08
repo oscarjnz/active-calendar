@@ -123,3 +123,16 @@ export function isMorningWindowSdq(now: Date = new Date()): boolean {
   const h = toSdqParts(now).hour;
   return h >= 6 && h <= 8;
 }
+
+/** Id estable del receso actual ("YYYY-B", bloque que empieza al salir del receso), o null
+ *  si no estamos en receso. Sirve para no repetir el wizard de cambio de cuatrimestre más
+ *  de una vez por receso. */
+export function currentRecesoId(now: Date = new Date()): string | null {
+  const week = currentAcademicWeek(now);
+  if (week.week !== null) return null;
+  // bloque siguiente al actual (1->2->3->1, con año+1 al pasar de 3 a 1)
+  const p = toSdqParts(now);
+  const nextBlock = ((week.block % 3) + 1) as 1 | 2 | 3;
+  const nextYear = week.block === 3 ? p.year + 1 : p.year;
+  return `${nextYear}-${nextBlock}`;
+}

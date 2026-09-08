@@ -318,6 +318,8 @@ export default {
           notify_dow?: number;
           notify_time?: string;
           telegram_notify?: boolean;
+          completed_courses?: string[];
+          term_wizard_resolved_for?: string | null;
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });

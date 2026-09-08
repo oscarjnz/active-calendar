@@ -118,12 +118,31 @@ const RAW: Array<[string, string, number, boolean?, string?]> = [
   ['TI3512', 'Ethical Hacking', 10, true, 'Gestión de Ciberseguridad'],
   ['TI3522', 'Recuperación de Desastres y Manejo de Incidentes', 11, true, 'Gestión de Ciberseguridad'],
   ['TI3532', 'Análisis Forense', 11, true, 'Gestión de Ciberseguridad'],
-  // Concentración en Emprendimiento (abierta a todas las carreras)
-  ['UNBE01', 'Pensamiento y Acción Emprendedora', 9, true, 'Emprendimiento'],
-  ['UNBE02', 'Taller de Creatividad e Innovación para los Negocios', 9, true, 'Emprendimiento'],
-  ['UNB303', 'Emprendimiento para la Creación de Nuevos Negocios', 9, true, 'Emprendimiento'],
-  ['UNB304', 'Gestión de Nuevos Negocios (Startups)', 9, true, 'Emprendimiento'],
-  ['UNB305', 'Intraemprendimiento (Emprendimiento Corporativo)', 9, true, 'Emprendimiento'],
+  // Concentración en Emprendimiento (abierta a todas las carreras). Se construye
+  // sobre UNB101 (sem 2) y AD8220 (sem 11), ya core, sin volver a listarlas aquí.
+  ['AD7519', 'Emprendimiento para la Creación de Nuevos Negocios', 9, true, 'Emprendimiento'],
+  ['AD7521', 'Gestión de Nuevos Negocios (Startups)', 10, true, 'Emprendimiento'],
+  ['AD7522', 'Intraemprendimiento (Emprendimiento Corporativo)', 11, true, 'Emprendimiento'],
+  // Concentración en Investigación (sobre UNB200, ya core en sem 4)
+  ['RT1100', 'Filosofía de la Ciencia', 9, true, 'Investigación'],
+  ['RT1130', 'Estadística II', 10, true, 'Investigación'],
+  ['RT1150', 'Prácticas de la Investigación', 11, true, 'Investigación'],
+  // Concentración en Innovación + Desarrollo (sobre TI3111, ya core en sem 3).
+  // PENDIN1 es un placeholder: el pensum lo marca "N/A" (sin código oficial
+  // asignado todavía), así que nunca va a aparecer en un feed real de
+  // Blackboard y jamás se autoderiva; solo sirve para que el estudiante lo vea
+  // y lo elija a mano en el picker.
+  ['UNB300', 'Estrategias de Innovación', 9, true, 'Innovación + Desarrollo'],
+  ['PENDIN1', 'Pasantía en Innovación', 10, true, 'Innovación + Desarrollo'],
+  // Concentración en Gestión de Proyectos: sus 3 materias son placeholders
+  // (sin código oficial en el pensum, "N/A" en la fuente), mismo caso que
+  // PENDIN1 arriba. PENDGP3 ("Preparación para la Certificación CAPM/PMP")
+  // podría ser la misma materia que IC4525 ("Seminario de Preparación al
+  // CAPM-PMI", Electiva profesional), pero queda como entrada separada hasta
+  // que se confirme; no se fusionan a ciegas.
+  ['PENDGP1', 'Introducción a la Gestión de Proyectos (PMBOK)', 9, true, 'Gestión de Proyectos'],
+  ['PENDGP2', 'Gestión de Proyectos Ágiles', 10, true, 'Gestión de Proyectos'],
+  ['PENDGP3', 'Preparación para la Certificación CAPM/PMP', 11, true, 'Gestión de Proyectos'],
   // Electiva profesional común con otras carreras
   ['IC4525', 'Seminario de Preparación al CAPM-PMI', 9, true, 'Electiva profesional'],
 ];
@@ -195,3 +214,86 @@ export const COURSE_SIGNALS: Record<string, string[]> = {
   // Malware y Vulnerabilidades (electiva)
   TI3702: ['analisis de malware', 'malware'],
 };
+
+/**
+ * Prerequisitos por código de materia: cada grupo interno es una alternativa OR
+ * (basta aprobar una de sus opciones), y los grupos entre sí son AND (hace
+ * falta satisfacer cada grupo). Extraídos del PDF oficial del pensum (donde
+ * "/" significa OR entre alternativas) y de la lista de prerequisitos de las
+ * concentraciones existentes que dio el usuario (donde "," significa AND).
+ * Solo se usa para mostrar avisos (nunca bloquea selección): ver
+ * `prereqSatisfied` y el wizard de cambio de cuatrimestre en html.ts.
+ */
+export type PrereqGroup = string[];
+export const PREREQS: Record<string, PrereqGroup[]> = {
+  // Obligatorias (PDF oficial del pensum)
+  EGC154: [['EGC153']],
+  EGL302: [['EGL301']],
+  TI3110: [['EGC153']],
+  TI3121: [['TI3120']],
+  EGC155: [['EGC154']],
+  EGC156: [['EGC153']],
+  EGC170: [['EGC154']],
+  EGL121: [['EGL120']],
+  EGL303: [['EGL302']],
+  TI3212: [['TI3211']],
+  TI3111: [['TI3110']],
+  EGC252: [['EGC155', 'EGC156']],
+  EGC270: [['EGC170']],
+  EGL304: [['EGL303']],
+  TI3210: [['TI3110']],
+  TI3211: [['TI3111']],
+  EGC253: [['EGC252']],
+  EGC255: [['UNB202']],
+  EGC271: [['EGC252', 'EGC270']],
+  TI3213: [['TI3111', 'TI3210']],
+  TI3630: [['TI3111', 'TI3121']],
+  EGC254: [['EGC253']],
+  IG1330: [['EGC154']],
+  TI3214: [['TI3213']],
+  TI3215: [['TI3211', 'TI3213']],
+  TI3220: [['EGC271']],
+  TI3600: [['TI3630']],
+  II4212: [['EGC253', 'UNB202']],
+  II4440: [['IG1330']],
+  TI3310: [['TI3110']],
+  TI3311: [['TI3213', 'TI3215']],
+  TI3320: [['TI3220']],
+  TI3321: [['TI3121']],
+  TI3322: [['TI3121']],
+  TI3312: [['TI3311']],
+  TI3313: [['TI3311']],
+  TI3314: [['TI3110']],
+  TI3323: [['TI3220']],
+  TI3315: [['TI3313']],
+  TI3316: [['TI3215']],
+  TI3325: [['TI3322']],
+  TI3326: [['TI3323']],
+  TI3610: [['TI3600', 'TI3631']],
+  TI3620: [['TI3631']],
+  TI3631: [['TI3312', 'TI3322', 'TI3324', 'TI3630']],
+  TI3432: [['II4440']],
+  AD8220: [['AD8120']],
+  TI3433: [['TI3430']],
+  TI3621: [['TI3620']],
+  // Concentración: Gestión de Software / Gestión de Ciberseguridad
+  TI3701: [['TI3214']],
+  TI3711: [['TI3211'], ['TI3214']],
+  TI3501: [['TI3212']],
+  TI3511: [['TI3215'], ['TI3314']],
+  TI3521: [['TI3313']],
+  TI3531: [['TI3321']],
+  TI3702: [['TI3212'], ['TI3321']],
+  TI3712: [['TI3110']],
+  TI3502: [['TI3321']],
+  TI3512: [['TI3321']],
+  TI3522: [['TI3502']], // depende de otra electiva del mismo track, no de una core
+  TI3532: [['TI3321']],
+};
+
+/** true si `completed` (Set de códigos normalizados) satisface el prerequisito de `code`. */
+export function prereqSatisfied(code: string, completed: Set<string>): boolean {
+  const groups = PREREQS[normalizeCode(code)];
+  if (!groups) return true; // sin prereq documentado
+  return groups.every((g) => g.some((alt) => completed.has(normalizeCode(alt))));
+}
