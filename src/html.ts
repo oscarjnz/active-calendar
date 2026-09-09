@@ -120,8 +120,10 @@ export function renderApp(env: Env): string {
   }
   select::-ms-expand { display: none; }
   /* Variante compacta: el select-etiqueta de "Asignar materia" en cada tarea, donde el
-     select grande queda desproporcionado. */
-  select.select-compact { background-position: right .4rem center; background-size: .7rem; padding-right: 1.3rem; }
+     select grande queda desproporcionado. width:fit-content fuerza que se ajuste a su
+     contenido (como cualquier <select> nativo) en vez de estirarse a lo ancho de la fila
+     flex que lo contiene, que es lo que pasaba sin esto. */
+  select.select-compact { width: fit-content; max-width: 100%; background-position: right .4rem center; background-size: .7rem; padding-right: 1.3rem; }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
   /* Solo las cards realmente interactivas (ej. una tarea) se levantan al pasar el mouse;
      las cards contenedoras (ajustes, estados vacíos) se quedan quietas: no son clicables
