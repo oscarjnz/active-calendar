@@ -5,11 +5,13 @@ compatibility_flags = ["nodejs_compat"]
 # Minifica el bundle del Worker en cada deploy (más liviano y menos legible).
 minify = true
 
-# Cron triggers (UTC). Los 3 "0 11/15/23" = 07:00/11:00/19:00 SDQ: sincronizan el
-# iCal de todos los usuarios. El "*/30" corre cada 30 min y solo despacha los
-# recordatorios por correo a la hora personalizada de cada quien (resolución 30 min).
+# Cron trigger (UTC), cada 30 min: sincroniza el iCal de Blackboard de todos los
+# usuarios (deriva materia, guarda tareas), dispara la alerta INSTANTÁNEA de tareas
+# nuevas si `computeDelta` detectó alguna (agrupadas en un solo correo/mensaje por
+# tick, ver notifyNewTasks en index.ts), y despacha el resumen semanal a la hora
+# personalizada de cada quien (resolución de 30 min).
 [triggers]
-crons = ["0 11 * * *", "0 15 * * *", "0 23 * * *", "*/30 * * * *"]
+crons = ["*/30 * * * *"]
 
 # Variables NO secretas (se versionan aquí). APP_BASE_URL = URL real del Worker.
 # CLERK_PUBLISHABLE_KEY (pk_...) es PÚBLICA: pégala aquí (acaba incrustada en el HTML

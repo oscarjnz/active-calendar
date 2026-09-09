@@ -1,4 +1,4 @@
-import type { Env, Profile, TaskRow } from './types';
+import type { Env, IcalEvent, Profile, TaskRow } from './types';
 import { normalizeCode, pensumName } from './pensum';
 import { formatSdq, currentAcademicWeek, currentWeekRangeSdq, type AcademicWeek } from './time';
 import {
@@ -19,6 +19,9 @@ function esc(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/** Forma mínima que necesitan las plantillas (TaskRow e IcalEvent mapeado la satisfacen). */
+type TaskLike = Pick<TaskRow, 'summary' | 'course_code' | 'due'>;
+
 /** Nombre legible de una materia: perfil > pensum > el propio código. */
 function courseName(profile: Profile, code: string): string {
   const norm = normalizeCode(code);
@@ -27,10 +30,21 @@ function courseName(profile: Profile, code: string): string {
 }
 
 /** Etiqueta "CÓDIGO · NOMBRE" en mayúsculas, o "SIN MATERIA". */
-function taskCourseLabel(profile: Profile, t: TaskRow): string {
+function taskCourseLabel(profile: Profile, t: TaskLike): string {
   const code = t.course_code ? normalizeCode(t.course_code) : null;
   if (!code) return 'SIN MATERIA';
   return code + ' · ' + courseName(profile, code).toUpperCase();
+}
+
+/** Agrupa tareas por materia preservando el orden de llegada. */
+function groupByCourse(profile: Profile, tasks: TaskLike[]): Map<string, TaskLike[]> {
+  const groups = new Map<string, TaskLike[]>();
+  for (const t of tasks) {
+    const label = taskCourseLabel(profile, t);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label)!.push(t);
+  }
+  return groups;
 }
 
 /** Envía un mensaje de Telegram. Lanza si la API responde mal. */
@@ -77,12 +91,7 @@ function buildTasksText(profile: Profile, pending: TaskRow[], week: AcademicWeek
   }
 
   // Agrupa por materia preservando el orden de vencimiento.
-  const groups = new Map<string, TaskRow[]>();
-  for (const t of pending) {
-    const label = taskCourseLabel(profile, t);
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label)!.push(t);
-  }
+  const groups = groupByCourse(profile, pending);
 
   let body = `Tienes <b>${pending.length}</b> ${pending.length === 1 ? 'tarea pendiente' : 'tareas pendientes'} esta semana.\n`;
   for (const [label, tasks] of groups) {
@@ -105,6 +114,52 @@ export async function sendWeeklyTelegram(
 ): Promise<void> {
   if (!profile.telegram_chat_id) throw new Error('profile has no telegram_chat_id');
   const text = buildTasksText(profile, pending, week, env.APP_BASE_URL);
+  await sendTelegramMessage(env, profile.telegram_chat_id, text);
+}
+
+/** Construye el texto (HTML) de una alerta instantánea de tareas nuevas, agrupadas por materia. */
+function buildNewTasksText(profile: Profile, tasks: TaskLike[], week: AcademicWeek, appUrl: string): string {
+  const weekLine = week.week
+    ? `Semana ${week.week} de 15 · ${week.blockLabel}`
+    : `En receso · ${week.blockLabel}`;
+
+  const head =
+    `🔔 <b>Active Calendar</b>\n` +
+    `Hola, ${esc(firstName(profile))}\n` +
+    `<i>${esc(weekLine)}</i>\n\n`;
+
+  const groups = groupByCourse(profile, tasks);
+  let body = `Se detectaron <b>${tasks.length}</b> ${tasks.length === 1 ? 'tarea nueva' : 'tareas nuevas'} en Blackboard.\n`;
+  for (const [label, items] of groups) {
+    body += `\n<b>${esc(label)}</b>\n`;
+    for (const t of items) {
+      const due = t.due ? esc(formatSdq(new Date(t.due))) : 'Sin fecha';
+      body += `• ${esc(t.summary)} — <i>${due}</i>\n`;
+    }
+  }
+  body += `\n<a href="${esc(appUrl)}">Abrir Active Calendar</a>`;
+  return head + body;
+}
+
+/**
+ * Envía una alerta instantánea de tareas nuevas (agrupadas en un solo mensaje). Se dispara
+ * apenas un sync detecta tareas que no existían antes; a diferencia de sendWeeklyTelegram,
+ * no depende del día/hora elegidos por el usuario ni tiene guard de "ya enviado hoy" (cada
+ * tarea solo puede ser "nueva" una vez, ver computeDelta en diff.ts).
+ */
+export async function sendNewTasksTelegram(
+  env: Env,
+  profile: Profile,
+  created: IcalEvent[],
+  week: AcademicWeek,
+): Promise<void> {
+  if (!profile.telegram_chat_id) throw new Error('profile has no telegram_chat_id');
+  const tasks: TaskLike[] = created.map((ev) => ({
+    summary: ev.summary,
+    course_code: ev.courseCode,
+    due: ev.due ? ev.due.toISOString() : null,
+  }));
+  const text = buildNewTasksText(profile, tasks, week, env.APP_BASE_URL);
   await sendTelegramMessage(env, profile.telegram_chat_id, text);
 }
 

@@ -1,4 +1,4 @@
-import type { Env, Profile } from './types';
+import type { Env, IcalEvent, Profile } from './types';
 import { collectEnrolledCourses, deriveCourseCode, deriveCourseCodeByProximity, filterInRange, parseIcal } from './ical';
 import { computeDelta } from './diff';
 import {
@@ -24,8 +24,8 @@ import {
 } from './supabase';
 import { getAuthUserId } from './clerk';
 import { currentAcademicWeek, currentWeekRangeSdq, toSdqParts } from './time';
-import { sendWeeklyEmail } from './email';
-import { handleTelegramUpdate, newLinkCode, sendWeeklyTelegram } from './telegram';
+import { sendNewTasksEmail, sendWeeklyEmail } from './email';
+import { handleTelegramUpdate, newLinkCode, sendNewTasksTelegram, sendWeeklyTelegram } from './telegram';
 import { renderApp } from './html';
 
 // Logo / favicon: marca minimalista (calendario + check) en SVG. Se sirve como
@@ -82,8 +82,8 @@ async function backfillCourseCodes(
 async function syncOne(
   env: Env,
   profile: Profile,
-): Promise<{ weekCount: number; created: number; modified: number }> {
-  if (!profile.ical_url) return { weekCount: 0, created: 0, modified: 0 };
+): Promise<{ weekCount: number; created: IcalEvent[]; modified: number }> {
+  if (!profile.ical_url) return { weekCount: 0, created: [], modified: 0 };
   const sb = adminClient(env);
   const raw = await fetchIcal(profile.ical_url);
   const all = parseIcal(raw);
@@ -129,7 +129,7 @@ async function syncOne(
   // materia por syncs anteriores (ver backfillCourseCodes arriba).
   await backfillCourseCodes(sb, profile.user_id, courses);
 
-  return { weekCount: inWeek.length, created: delta.created.length, modified: delta.modified.length };
+  return { weekCount: inWeek.length, created: delta.created, modified: delta.modified.length };
 }
 
 function sameSdqDay(a: Date, b: Date): boolean {
@@ -195,6 +195,37 @@ async function maybeNotify(
   }
 }
 
+/**
+ * Alerta INSTANTÁNEA de tareas nuevas (distinta del resumen semanal de maybeNotify): se
+ * dispara apenas un sync detecta tareas que no existían antes, agrupando TODAS las
+ * detectadas en ese mismo sync en un solo mensaje/correo por canal (ver `scheduled`, que
+ * ahora sincroniza cada 30 min). No depende del día/hora elegidos por el usuario ni tiene
+ * guard de "ya enviado hoy": es idempotente porque `computeDelta` (diff.ts) solo marca una
+ * tarea como "created" la primera vez que aparece (tras `upsertEvents` ya queda "existing").
+ */
+async function notifyNewTasks(env: Env, profile: Profile, created: IcalEvent[]): Promise<void> {
+  if (created.length === 0) return;
+  const wantEmail = !!(env.RESEND_API_KEY && profile.email && profile.email_notify);
+  const wantTelegram = !!(env.TELEGRAM_BOT_TOKEN && profile.telegram_chat_id && profile.telegram_notify);
+  if (!wantEmail && !wantTelegram) return;
+
+  const week = currentAcademicWeek();
+  if (wantEmail) {
+    try {
+      await sendNewTasksEmail(env, profile, created, week);
+    } catch (err) {
+      console.error(`new-tasks email ${profile.user_id}:`, (err as Error).message);
+    }
+  }
+  if (wantTelegram) {
+    try {
+      await sendNewTasksTelegram(env, profile, created, week);
+    } catch (err) {
+      console.error(`new-tasks telegram ${profile.user_id}:`, (err as Error).message);
+    }
+  }
+}
+
 function json(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -216,23 +247,23 @@ export default {
           const sb = adminClient(env);
           const profiles = await listAllProfilesWithIcal(sb);
           const now = new Date();
-          // El iCal se sincroniza solo en las corridas "pesadas" (3/día). El
-          // chequeo de correo corre en cada tick (cada 30 min) para respetar la
-          // hora personalizada de cada usuario; el guard de "ya enviado hoy" evita
-          // duplicados.
-          const SYNC_CRONS = ['0 11 * * *', '0 15 * * *', '0 23 * * *'];
-          const doSync = SYNC_CRONS.includes(event.cron);
+          // El iCal se sincroniza en CADA tick (cada 30 min) para poder detectar tareas
+          // nuevas casi en tiempo real y avisar de inmediato (notifyNewTasks) en vez de
+          // esperar al resumen semanal. El chequeo del resumen semanal (maybeNotify)
+          // también corre en cada tick para respetar la hora personalizada de cada
+          // usuario; su guard de "ya enviado hoy" evita duplicados.
           const concurrency = 5;
           let i = 0;
           const worker = async (): Promise<void> => {
             while (i < profiles.length) {
               const p = profiles[i++]!;
-              if (doSync) {
-                try {
-                  await syncOne(env, p);
-                } catch (err) {
-                  console.error(`sync user ${p.user_id}:`, (err as Error).message);
+              try {
+                const result = await syncOne(env, p);
+                if (result.created.length > 0) {
+                  await notifyNewTasks(env, p, result.created);
                 }
+              } catch (err) {
+                console.error(`sync user ${p.user_id}:`, (err as Error).message);
               }
               try {
                 await maybeNotify(env, sb, p, now);
@@ -433,7 +464,7 @@ export default {
         const result = await syncOne(env, profile);
         const { start, end } = currentWeekRangeSdq();
         const tasks = await listWeekTasks(sb, u, start, end);
-        return json({ ...result, tasks });
+        return json({ weekCount: result.weekCount, created: result.created.length, modified: result.modified, tasks });
       } catch (err) {
         return json({ error: (err as Error).message }, { status: 502 });
       }
