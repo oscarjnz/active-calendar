@@ -649,12 +649,21 @@ function mountUserButton(node) {
 // prerequisito no está satisfecho.
 function coursePicker(selected, initialTerm, completed) {
   const a = ac();
-  // Si el estudiante ya tiene seleccionadas materias de otro cuatrimestre o
-  // electivas, abrimos la sección avanzada de entrada.
-  let showMore = false;
+  // Concentraciones disponibles (nombres originales del pensum), en el orden en que aparecen.
+  const CONCENTRATIONS = [...new Set(PENSUM.filter(x => x.elective).map(x => x.concentration))];
+  // Estado inicial de las 3 secciones avanzadas, inferido de lo ya seleccionado:
+  // electiva -> "ya tomando electivas"; materia core de un cuatrimestre posterior
+  // al actual -> "otro cuatrimestre" (avanzando); materia core de uno anterior ->
+  // solo se puede representar en "fuera de bloque" (única sección sin restricción de rango).
+  let showElectives = false, showOffBlock = false, showOther = false;
+  const selectedConc = new Set();
   for (const [code] of selected) {
     const p = PENSUM_BY_CODE.get(code);
-    if (p && (p.elective || (initialTerm && p.sem !== initialTerm))) { showMore = true; break; }
+    if (!p) continue;
+    if (p.elective) { showElectives = true; if (p.concentration) selectedConc.add(p.concentration); continue; }
+    if (initialTerm && p.sem !== initialTerm) {
+      if (p.sem > initialTerm) showOther = true; else showOffBlock = true;
+    }
   }
   const wrap = el(\`
     <div class="space-y-4">
@@ -673,22 +682,38 @@ function coursePicker(selected, initialTerm, completed) {
         <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Selecciona las materias que estás cursando. Las electivas que detectemos en tu Blackboard ya vienen marcadas.</p>
         <div id="chips" class="flex flex-wrap gap-2"></div>
       </div>
-      <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
-        <input id="moreToggle" type="checkbox" class="\${a.text} rounded border-neutral-300 dark:border-neutral-600 focus:ring-0" \${showMore?'checked':''} />
-        <span>Estoy fuera de bloque o tomo electivas / materias de otros cuatrimestres</span>
-      </label>
-      <div id="moreBox" class="space-y-4 \${showMore?'':'hidden'}">
-        <div>
-          <span class="text-sm font-medium">Electivas por concentración</span>
-          <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Marca las electivas que estás cursando. Están agrupadas por concentración.</p>
-          <div id="elecChips" class="space-y-3"></div>
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1">Materias de otro cuatrimestre</label>
-          <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Si llevas materias adelantadas o atrasadas, elige el cuatrimestre para verlas.</p>
-          <select id="otherTerm" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
+      <div class="space-y-3 pt-3 border-t border-neutral-200 dark:border-neutral-800">
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input id="offBlockToggle" type="checkbox" class="\${a.text} rounded border-neutral-300 dark:border-neutral-600 focus:ring-0" \${showOffBlock?'checked':''} />
+          <span>Estoy fuera de bloque</span>
+        </label>
+        <div id="offBlockBox" class="space-y-2 pl-6 \${showOffBlock?'':'hidden'}">
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">Elige cualquier cuatrimestre para ver y marcar sus materias, sin restricción.</p>
+          <select id="offBlockTerm" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
             <option value="">Selecciona un cuatrimestre…</option>
             \${Array.from({length:12}, (_,i)=> '<option value="'+(i+1)+'">Cuatrimestre '+(i+1)+'</option>').join('')}
+          </select>
+          <div id="offBlockChips" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input id="electiveToggle" type="checkbox" class="\${a.text} rounded border-neutral-300 dark:border-neutral-600 focus:ring-0" \${showElectives?'checked':''} />
+          <span>Ya estoy tomando electivas</span>
+        </label>
+        <div id="electiveBox" class="space-y-3 pl-6 \${showElectives?'':'hidden'}">
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">¿Qué electiva(s) estás tomando? Puedes elegir más de una.</p>
+          <div id="concChips" class="flex flex-wrap gap-2"></div>
+          <div id="elecChips" class="space-y-3"></div>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input id="otherToggle" type="checkbox" class="\${a.text} rounded border-neutral-300 dark:border-neutral-600 focus:ring-0" \${showOther?'checked':''} />
+          <span>Estoy tomando materias de otro cuatrimestre</span>
+        </label>
+        <div id="otherBox" class="space-y-2 pl-6 \${showOther?'':'hidden'}">
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">Para adelantar materias: solo se muestran los cuatrimestres posteriores al que elegiste arriba.</p>
+          <select id="otherTerm" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
+            <option value="">Selecciona un cuatrimestre…</option>
           </select>
           <div id="otherChips" class="flex flex-wrap gap-2"></div>
         </div>
@@ -696,10 +721,14 @@ function coursePicker(selected, initialTerm, completed) {
     </div>
   \`);
   const chipsBox = wrap.querySelector('#chips');
+  const concBox = wrap.querySelector('#concChips');
   const elecBox = wrap.querySelector('#elecChips');
+  const offBlockChips = wrap.querySelector('#offBlockChips');
   const otherBox = wrap.querySelector('#otherChips');
   const countEl = wrap.querySelector('#selCount');
-  const moreBox = wrap.querySelector('#moreBox');
+  const offBlockBox = wrap.querySelector('#offBlockBox');
+  const electiveBox = wrap.querySelector('#electiveBox');
+  const otherSectionBox = wrap.querySelector('#otherBox');
 
   function chipClass(on) {
     return 'chip pressable px-3 py-1.5 rounded-full text-sm border ' +
@@ -721,6 +750,15 @@ function coursePicker(selected, initialTerm, completed) {
     });
     return chip;
   }
+  function makeConcChip(name) {
+    const on = selectedConc.has(name);
+    const chip = el('<button type="button" class="'+chipClass(on)+'">'+esc(name)+'</button>');
+    chip.addEventListener('click', () => {
+      if (selectedConc.has(name)) selectedConc.delete(name); else selectedConc.add(name);
+      drawElectives();
+    });
+    return chip;
+  }
   function drawCore() {
     chipsBox.innerHTML = '';
     const term = parseInt(wrap.querySelector('#termSel').value, 10);
@@ -735,11 +773,19 @@ function coursePicker(selected, initialTerm, completed) {
     if (!list.length) chipsBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Elige tu cuatrimestre para ver las materias.</p>'));
     for (const c of list) chipsBox.appendChild(makeChip(c, drawAll));
   }
+  function drawConcChips() {
+    concBox.innerHTML = '';
+    for (const name of CONCENTRATIONS) concBox.appendChild(makeConcChip(name));
+  }
   function drawElectives() {
     elecBox.innerHTML = '';
-    // Agrupa las electivas por concentración para una elección más clara.
+    if (!selectedConc.size) {
+      elecBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Elige arriba qué electiva(s) estás tomando.</p>'));
+      return;
+    }
+    // Agrupa las electivas por concentración (solo las elegidas arriba) para una elección más clara.
     const groups = new Map();
-    for (const c of PENSUM.filter(x => x.elective)) {
+    for (const c of PENSUM.filter(x => x.elective && selectedConc.has(x.concentration))) {
       const g = c.concentration || 'Otras electivas';
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g).push(c);
@@ -754,6 +800,24 @@ function coursePicker(selected, initialTerm, completed) {
       elecBox.appendChild(sec);
     }
   }
+  function drawOffBlock() {
+    offBlockChips.innerHTML = '';
+    const term = parseInt(wrap.querySelector('#offBlockTerm').value, 10);
+    if (!term) return;
+    const list = PENSUM.filter(x => x.sem === term && !x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
+    for (const c of list) offBlockChips.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
+  }
+  // El selector de "otro cuatrimestre" (avanzando) solo ofrece cuatrimestres
+  // posteriores al elegido arriba; se reconstruye cada vez que ese cambia.
+  function rebuildOtherTermOptions() {
+    const cur = parseInt(wrap.querySelector('#termSel').value, 10) || 0;
+    const otherTermSel = wrap.querySelector('#otherTerm');
+    const prevVal = otherTermSel.value;
+    const opts = Array.from({length:12}, (_,i)=>i+1).filter(t => t > cur);
+    otherTermSel.innerHTML = '<option value="">Selecciona un cuatrimestre…</option>' +
+      opts.map(t => '<option value="'+t+'"'+(String(t)===prevVal?' selected':'')+'>Cuatrimestre '+t+'</option>').join('');
+    if (!opts.some(t => String(t) === prevVal)) otherTermSel.value = '';
+  }
   function drawOther() {
     otherBox.innerHTML = '';
     const term = parseInt(wrap.querySelector('#otherTerm').value, 10);
@@ -761,13 +825,21 @@ function coursePicker(selected, initialTerm, completed) {
     const list = PENSUM.filter(x => x.sem === term && !x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
     for (const c of list) otherBox.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
   }
-  function drawAll() { drawCore(); drawElectives(); drawOther(); updateCount(); }
+  function drawAll() { drawCore(); drawConcChips(); drawElectives(); drawOffBlock(); drawOther(); updateCount(); }
 
-  wrap.querySelector('#termSel').addEventListener('change', drawAll);
+  wrap.querySelector('#termSel').addEventListener('change', () => { rebuildOtherTermOptions(); drawAll(); });
+  wrap.querySelector('#offBlockTerm').addEventListener('change', drawOffBlock);
   wrap.querySelector('#otherTerm').addEventListener('change', drawOther);
-  wrap.querySelector('#moreToggle').addEventListener('change', (e) => {
-    moreBox.classList.toggle('hidden', !e.currentTarget.checked);
+  wrap.querySelector('#offBlockToggle').addEventListener('change', (e) => {
+    offBlockBox.classList.toggle('hidden', !e.currentTarget.checked);
   });
+  wrap.querySelector('#electiveToggle').addEventListener('change', (e) => {
+    electiveBox.classList.toggle('hidden', !e.currentTarget.checked);
+  });
+  wrap.querySelector('#otherToggle').addEventListener('change', (e) => {
+    otherSectionBox.classList.toggle('hidden', !e.currentTarget.checked);
+  });
+  rebuildOtherTermOptions();
   drawAll();
   return wrap;
 }
