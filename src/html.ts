@@ -1352,6 +1352,18 @@ function renderAjustes(node) {
         <label class="block text-sm">URL iCal</label>
         <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
       </div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="font-medium">Aviso instantáneo de tareas nuevas</h3>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Además del resumen semanal, avísame apenas Blackboard tenga una tarea nueva (revisamos cada 30 min; si aparecen varias juntas, llegan en un solo aviso). Se envía por los canales que actives abajo (correo y/o Telegram).</p>
+            <span id="ntamsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
+          </div>
+          <button id="newTaskAlertsToggle" role="switch" aria-checked="\${p.new_task_alerts?'true':'false'}" class="pressable shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 [transition-timing-function:var(--ease-out)] \${p.new_task_alerts?a.bar:'bg-neutral-300 dark:bg-neutral-700'}">
+            <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 [transition-timing-function:var(--ease-out)] \${p.new_task_alerts?'translate-x-5':'translate-x-0.5'}"></span>
+          </button>
+        </div>
+      </div>
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
@@ -1438,6 +1450,32 @@ function renderAjustes(node) {
       cmsg.textContent = 'Materias guardadas.';
       renderTab();
     } catch (err) { cmsg.textContent = 'Error: ' + err.message; btn.disabled = false; }
+  });
+
+  // Toggle de aviso instantáneo de tareas nuevas: guarda al instante.
+  const ntaToggle = card.querySelector('#newTaskAlertsToggle');
+  const ntaKnob = ntaToggle.querySelector('span');
+  const ntamsg = card.querySelector('#ntamsg');
+  function paintNta(on) {
+    ntaToggle.setAttribute('aria-checked', on ? 'true' : 'false');
+    ntaToggle.classList.toggle(ac().bar, on);
+    ntaToggle.classList.toggle('bg-neutral-300', !on);
+    ntaToggle.classList.toggle('dark:bg-neutral-700', !on);
+    ntaKnob.classList.toggle('translate-x-5', on);
+    ntaKnob.classList.toggle('translate-x-0.5', !on);
+  }
+  ntaToggle.addEventListener('click', async () => {
+    const next = ntaToggle.getAttribute('aria-checked') !== 'true';
+    paintNta(next);
+    ntamsg.textContent = 'Guardando…';
+    try {
+      const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ new_task_alerts: next }) });
+      state.profile = r.profile;
+      ntamsg.textContent = next ? 'Aviso instantáneo activado.' : 'Aviso instantáneo desactivado; solo recibirás el resumen semanal.';
+    } catch (err) {
+      paintNta(!next);
+      ntamsg.textContent = 'Error: ' + err.message;
+    }
   });
 
   // Toggle de recordatorio por correo: guarda al instante.

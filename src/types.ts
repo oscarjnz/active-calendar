@@ -45,6 +45,7 @@ export interface Profile {
   term: number | null; // cuatrimestre/semestre actual (1-12)
   courses: Course[]; // materias seleccionadas + autodescubiertas
   email_notify: boolean; // recibir el recordatorio semanal por correo
+  new_task_alerts: boolean; // avisar al instante cuando hay tareas nuevas (además del resumen semanal)
   notify_dow: number; // día de la semana elegido para el envío (1=Lun..7=Dom)
   notify_time: string; // hora local SDQ "HH:MM" elegida por el usuario para el envío
   last_emailed: string | null; // ISO del último correo enviado (anti-duplicados)
