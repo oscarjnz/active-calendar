@@ -799,13 +799,17 @@ function termWizardStep2() {
     '<p class="text-sm text-neutral-600 dark:text-neutral-300">¿Dejaste, reprobaste, o te falta algún prerequisito pendiente en alguna de estas materias de '+
       (p.term ? 'cuatrimestre ' + p.term : 'este cuatrimestre') + '?</p>' +
     '<div id="wzList" class="space-y-1">' + rows + '</div>' +
-    '<button id="wzNone" type="button" class="text-sm underline decoration-dotted hover:decoration-solid text-neutral-500 dark:text-neutral-400">No, aprobé todas</button>' +
-    '<div class="flex justify-end"><button id="wzContinue" class="' + ac().solid + ' text-white rounded-lg px-4 py-2 font-medium">Continuar</button></div>' +
+    '<div class="flex flex-wrap items-center justify-between gap-3">' +
+      '<button id="wzNone" type="button" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm rounded-lg px-3 py-2 font-medium">No, aprobé todas</button>' +
+      '<button id="wzContinue" class="' + ac().solid + ' text-white rounded-lg px-4 py-2 font-medium">Continuar</button>' +
+    '</div>' +
   '</div>';
   openModal('Materias de este cuatrimestre', body);
   const boxes = Array.prototype.slice.call(document.querySelectorAll('.wzFail'));
   const noneBtn = document.getElementById('wzNone');
-  if (noneBtn) noneBtn.addEventListener('click', () => { boxes.forEach(b => { b.checked = false; }); });
+  // "No, aprobé todas" avanza directo (sin reprobadas), no solo desmarca las casillas:
+  // antes había que además apretar "Continuar", lo cual no era obvio.
+  if (noneBtn) noneBtn.addEventListener('click', () => { termWizardStep3(new Set()); });
   document.getElementById('wzContinue').addEventListener('click', () => {
     const failed = new Set(boxes.filter(b => b.checked).map(b => b.dataset.code));
     termWizardStep3(failed);
