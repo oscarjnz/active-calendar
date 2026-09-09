@@ -759,12 +759,16 @@ function coursePicker(selected, initialTerm, completed) {
     });
     return chip;
   }
+  // Una materia que el perfil ya marca como aprobada no tiene sentido ofrecerla
+  // como opción para "estoy cursando esto" en ningún listado del picker; ya
+  // seleccionada previamente (caso raro) igual se respeta para poder desmarcarla.
+  function isDone(code) { return !!(completed && completed.has(normCode(code)) && !selected.has(code)); }
   function drawCore() {
     chipsBox.innerHTML = '';
     const term = parseInt(wrap.querySelector('#termSel').value, 10);
-    // Núcleo del cuatrimestre (no electivas) + las ya seleccionadas de ese término.
+    // Núcleo del cuatrimestre (no electivas, no ya aprobadas) + las ya seleccionadas de ese término.
     const byCode = new Map();
-    if (term) for (const c of PENSUM.filter(x => x.sem === term && !x.elective)) byCode.set(c.code, { code: c.code, name: c.name });
+    if (term) for (const c of PENSUM.filter(x => x.sem === term && !x.elective && !isDone(x.code))) byCode.set(c.code, { code: c.code, name: c.name });
     for (const [code, c] of selected) {
       const p = PENSUM_BY_CODE.get(code);
       if (!byCode.has(code) && (!p || (!p.elective && (!term || p.sem === term)))) byCode.set(code, c);
@@ -783,9 +787,9 @@ function coursePicker(selected, initialTerm, completed) {
       elecBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Elige arriba qué electiva(s) estás tomando.</p>'));
       return;
     }
-    // Agrupa las electivas por concentración (solo las elegidas arriba) para una elección más clara.
+    // Agrupa las electivas por concentración (solo las elegidas arriba, sin las ya aprobadas) para una elección más clara.
     const groups = new Map();
-    for (const c of PENSUM.filter(x => x.elective && selectedConc.has(x.concentration))) {
+    for (const c of PENSUM.filter(x => x.elective && selectedConc.has(x.concentration) && !isDone(x.code))) {
       const g = c.concentration || 'Otras electivas';
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g).push(c);
@@ -799,12 +803,13 @@ function coursePicker(selected, initialTerm, completed) {
       sec.appendChild(chips);
       elecBox.appendChild(sec);
     }
+    if (!elecBox.children.length) elecBox.appendChild(el('<p class="text-sm text-neutral-400 dark:text-neutral-500">Ya aprobaste todas las electivas de esa(s) concentración(es).</p>'));
   }
   function drawOffBlock() {
     offBlockChips.innerHTML = '';
     const term = parseInt(wrap.querySelector('#offBlockTerm').value, 10);
     if (!term) return;
-    const list = PENSUM.filter(x => x.sem === term && !x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
+    const list = PENSUM.filter(x => x.sem === term && !x.elective && !isDone(x.code)).sort((x,y) => x.name.localeCompare(y.name, 'es'));
     for (const c of list) offBlockChips.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
   }
   // El selector de "otro cuatrimestre" (avanzando) solo ofrece cuatrimestres
@@ -822,7 +827,7 @@ function coursePicker(selected, initialTerm, completed) {
     otherBox.innerHTML = '';
     const term = parseInt(wrap.querySelector('#otherTerm').value, 10);
     if (!term) return;
-    const list = PENSUM.filter(x => x.sem === term && !x.elective).sort((x,y) => x.name.localeCompare(y.name, 'es'));
+    const list = PENSUM.filter(x => x.sem === term && !x.elective && !isDone(x.code)).sort((x,y) => x.name.localeCompare(y.name, 'es'));
     for (const c of list) otherBox.appendChild(makeChip({ code: c.code, name: c.name }, drawAll));
   }
   function drawAll() { drawCore(); drawConcChips(); drawElectives(); drawOffBlock(); drawOther(); updateCount(); }
@@ -1301,9 +1306,11 @@ function renderAjustes(node) {
   node.appendChild(card);
   card.querySelector('#privacyLink').addEventListener('click', openPrivacy);
 
-  // Selector de cuatrimestre + materias.
+  // Selector de cuatrimestre + materias. Se filtran del picker las que el
+  // perfil ya marca como aprobadas (completed_courses), igual que en el wizard.
   const selected = new Map((p.courses || []).map(c => [normCode(c.code), { code: normCode(c.code), name: c.name }]));
-  const picker = coursePicker(selected, p.term || null);
+  const completedSet = new Set((p.completed_courses || []).map(normCode));
+  const picker = coursePicker(selected, p.term || null, completedSet);
   card.querySelector('#pickerSlot').appendChild(picker);
   card.querySelector('#termWizardBtn').addEventListener('click', () => termWizardStep2());
   card.querySelector('#saveCourses').addEventListener('click', async (e) => {
