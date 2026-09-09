@@ -125,7 +125,7 @@ export function renderApp(env: Env): string {
      alcanza (sigue dependiendo de ese mismo cálculo interno del navegador, e incluso varía
      de un navegador a otro). Un max-width fijo en rem + la clase "truncate" que ya trae
      (text-overflow:ellipsis) sí lo fuerza de forma confiable en cualquier navegador. */
-  select.select-compact { width: auto; max-width: 11rem; background-position: right .4rem center; background-size: .7rem; padding-right: 1.3rem; }
+  select.select-compact { width: auto; max-width: 11rem; background-position: right .55rem center; background-size: .65rem; padding-right: 1.9rem; }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
   /* Solo las cards realmente interactivas (ej. una tarea) se levantan al pasar el mouse;
      las cards contenedoras (ajustes, estados vacíos) se quedan quietas: no son clicables
@@ -239,12 +239,15 @@ if (!cfg.CLERK_PUBLISHABLE_KEY) {
 
 // ---------- utilidades ----------
 const ACCENTS = {
-  neutral: { solid: 'bg-neutral-900 hover:bg-neutral-800', text: 'text-neutral-900', soft: 'bg-neutral-100 dark:bg-neutral-800', ring: 'focus:ring-neutral-900', bar: 'bg-neutral-900', dot: 'bg-neutral-900' },
-  indigo:  { solid: 'bg-indigo-600 hover:bg-indigo-700', text: 'text-indigo-700', soft: 'bg-indigo-50', ring: 'focus:ring-indigo-600', bar: 'bg-indigo-600', dot: 'bg-indigo-600' },
-  emerald: { solid: 'bg-emerald-600 hover:bg-emerald-700', text: 'text-emerald-700', soft: 'bg-emerald-50', ring: 'focus:ring-emerald-600', bar: 'bg-emerald-600', dot: 'bg-emerald-600' },
-  rose:    { solid: 'bg-rose-600 hover:bg-rose-700', text: 'text-rose-700', soft: 'bg-rose-50', ring: 'focus:ring-rose-600', bar: 'bg-rose-600', dot: 'bg-rose-600' },
-  amber:   { solid: 'bg-amber-500 hover:bg-amber-600', text: 'text-amber-700', soft: 'bg-amber-50', ring: 'focus:ring-amber-500', bar: 'bg-amber-500', dot: 'bg-amber-500' },
-  sky:     { solid: 'bg-sky-600 hover:bg-sky-700', text: 'text-sky-700', soft: 'bg-sky-50', ring: 'focus:ring-sky-600', bar: 'bg-sky-600', dot: 'bg-sky-600' },
+  // chipBg/chipText: fondo suave + texto legible, con variante oscura propia (el resto de
+  // los campos de acento no tenía dark: para los colores no-neutrales, así que en modo
+  // oscuro un fondo "bg-indigo-50" se veía como una mancha casi blanca sobre fondo oscuro).
+  neutral: { solid: 'bg-neutral-900 hover:bg-neutral-800', text: 'text-neutral-900', soft: 'bg-neutral-100 dark:bg-neutral-800', ring: 'focus:ring-neutral-900', bar: 'bg-neutral-900', dot: 'bg-neutral-900', chipBg: 'bg-neutral-100 dark:bg-neutral-800', chipText: 'text-neutral-600 dark:text-neutral-300' },
+  indigo:  { solid: 'bg-indigo-600 hover:bg-indigo-700', text: 'text-indigo-700', soft: 'bg-indigo-50', ring: 'focus:ring-indigo-600', bar: 'bg-indigo-600', dot: 'bg-indigo-600', chipBg: 'bg-indigo-50 dark:bg-indigo-500/15', chipText: 'text-indigo-700 dark:text-indigo-300' },
+  emerald: { solid: 'bg-emerald-600 hover:bg-emerald-700', text: 'text-emerald-700', soft: 'bg-emerald-50', ring: 'focus:ring-emerald-600', bar: 'bg-emerald-600', dot: 'bg-emerald-600', chipBg: 'bg-emerald-50 dark:bg-emerald-500/15', chipText: 'text-emerald-700 dark:text-emerald-300' },
+  rose:    { solid: 'bg-rose-600 hover:bg-rose-700', text: 'text-rose-700', soft: 'bg-rose-50', ring: 'focus:ring-rose-600', bar: 'bg-rose-600', dot: 'bg-rose-600', chipBg: 'bg-rose-50 dark:bg-rose-500/15', chipText: 'text-rose-700 dark:text-rose-300' },
+  amber:   { solid: 'bg-amber-500 hover:bg-amber-600', text: 'text-amber-700', soft: 'bg-amber-50', ring: 'focus:ring-amber-500', bar: 'bg-amber-500', dot: 'bg-amber-500', chipBg: 'bg-amber-50 dark:bg-amber-500/15', chipText: 'text-amber-700 dark:text-amber-300' },
+  sky:     { solid: 'bg-sky-600 hover:bg-sky-700', text: 'text-sky-700', soft: 'bg-sky-50', ring: 'focus:ring-sky-600', bar: 'bg-sky-600', dot: 'bg-sky-600', chipBg: 'bg-sky-50 dark:bg-sky-500/15', chipText: 'text-sky-700 dark:text-sky-300' },
 };
 // Equivalente en HEX de cada acento, para el documento exportado (estilos en
 // línea, siempre en claro, independientes del tema de la app).
@@ -1172,7 +1175,7 @@ function taskRow(t) {
     function buildSelect() {
       const first = cur ? '<option value="">— Sin materia</option>' : '<option value="">+ Asignar materia</option>';
       const body = optList.map(c => '<option value="'+esc(c.code)+'"'+((cur && cur.code && cur.code === normCode(c.code))?' selected':'')+'>'+esc(fmtCourse(c.code, c.name))+'</option>').join('');
-      const sel = el('<select class="select-compact pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 max-w-full min-w-0 truncate '+a.ring+'">'+first+body+'</select>');
+      const sel = el('<select class="select-compact pressable text-xs font-medium rounded-full border border-transparent '+a.chipBg+' '+a.chipText+' px-2.5 py-1 hover:brightness-95 dark:hover:brightness-125 focus:outline-none focus:ring-2 max-w-full min-w-0 truncate '+a.ring+'">'+first+body+'</select>');
       sel.addEventListener('change', async (e) => {
         const code = e.target.value || null;
         e.target.disabled = true;
