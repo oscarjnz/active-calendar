@@ -78,14 +78,48 @@ export function renderApp(env: Env): string {
   /* Feedback de pulsación: todo lo pulsable responde al toque. */
   button, .pressable { transition: transform .16s var(--ease-out), background-color .16s ease, border-color .16s ease, box-shadow .16s var(--ease-out); }
   button:active, .pressable:active { transform: scale(0.97); }
+  /* Checkboxes también son pulsables (picker de materias, tareas, wizard). */
+  input[type="checkbox"] { transition: transform .12s var(--ease-out); }
+  input[type="checkbox"]:active { transform: scale(0.85); }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
+  /* Solo las cards realmente interactivas (ej. una tarea) se levantan al pasar el mouse;
+     las cards contenedoras (ajustes, estados vacíos) se quedan quietas: no son clicables
+     como bloque completo y "levantarlas" implicaría falsamente que sí lo son. */
+  @media (hover: hover) and (pointer: fine) {
+    .card.hover-lift:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -12px rgb(0 0 0 / 0.18); }
+    html.dark .card.hover-lift:hover { box-shadow: 0 10px 24px -12px rgb(0 0 0 / 0.55); }
+  }
 
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 9999px; }
   html.dark ::-webkit-scrollbar-thumb { background: #404040; }
 
+  /* Resplandor ambiental del panel de login (única pantalla donde vale la pena un
+     detalle decorativo constante: se ve una sola vez por sesión, no cientos de veces
+     al día). Respira lento y sutil; en reduced-motion se congela. */
+  .glow-orb {
+    position: absolute; top: 32%; left: 22%; width: 26rem; height: 26rem;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(129,140,248,0.35) 0%, rgba(129,140,248,0) 70%);
+    filter: blur(48px);
+    pointer-events: none;
+    animation: breathe 7s var(--ease-in-out) infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: .55; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: .9; transform: translate(-50%, -50%) scale(1.15); }
+  }
+
+  /* Único "momento" de celebración de la app: la semana entera queda al 100%. */
+  .pulse-once { animation: pulseOnce .9s var(--ease-out) 1; }
+  @keyframes pulseOnce {
+    0% { box-shadow: 0 0 0 0 rgba(16,185,129,.45); }
+    70% { box-shadow: 0 0 0 12px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .fade-in, .stagger > *, .spin { animation: none !important; }
+    .fade-in, .stagger > *, .spin, .glow-orb, .pulse-once { animation: none !important; }
     button, .pressable, .card { transition: none !important; }
   }
 </style>
@@ -562,14 +596,15 @@ function renderLanding() {
   root.innerHTML = '';
   const wrap = el(\`
     <div class="fade-in min-h-screen grid md:grid-cols-2">
-      <div class="hidden md:flex flex-col justify-center px-12 bg-neutral-900 text-white">
-        <div class="flex items-center gap-3">\${logoMark('h-9 w-9')}<h1 class="text-4xl font-semibold tracking-tight">Active Calendar</h1></div>
-        <p class="mt-4 text-neutral-300 max-w-sm">Todas tus tareas de Blackboard de la semana, organizadas por materia, en una sola vista. Sin instalar nada.</p>
-        <ul class="mt-8 space-y-2 text-sm text-neutral-400">
-          <li>· Resumen de progreso de la semana</li>
-          <li>· Tareas agrupadas por materia</li>
-          <li>· Marca lo que vas completando</li>
-          <li>· Se sincroniza solo varias veces al día</li>
+      <div class="relative overflow-hidden hidden md:flex flex-col justify-center px-12 bg-neutral-900 text-white">
+        <div class="glow-orb" aria-hidden="true"></div>
+        <div class="relative flex items-center gap-3">\${logoMark('h-9 w-9')}<h1 class="text-4xl font-semibold tracking-tight">Active Calendar</h1></div>
+        <p class="relative mt-4 text-neutral-300 max-w-sm">Todas tus tareas de Blackboard de la semana, organizadas por materia, en una sola vista. Sin instalar nada.</p>
+        <ul class="relative mt-8 space-y-2.5 text-sm text-neutral-400">
+          <li class="flex items-center gap-2.5"><svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l3.5 3.5L16 6"/></svg>Resumen de progreso de la semana</li>
+          <li class="flex items-center gap-2.5"><svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l3.5 3.5L16 6"/></svg>Tareas agrupadas por materia</li>
+          <li class="flex items-center gap-2.5"><svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l3.5 3.5L16 6"/></svg>Marca lo que vas completando</li>
+          <li class="flex items-center gap-2.5"><svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l3.5 3.5L16 6"/></svg>Se sincroniza solo varias veces al día</li>
         </ul>
       </div>
       <div class="flex items-center justify-center p-6">
@@ -1047,7 +1082,7 @@ function taskRow(t) {
   const a = ac();
   const done = t.status === 'done';
   const row = el(\`
-    <div class="card flex items-start gap-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-3 hover:border-neutral-300 dark:hover:border-neutral-700 hover:shadow-sm">
+    <div class="card hover-lift flex items-start gap-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-3 hover:border-neutral-300 dark:hover:border-neutral-700">
       <input type="checkbox" class="chk mt-0.5 h-4 w-4 accent-neutral-900 cursor-pointer shrink-0" \${done ? 'checked' : ''} />
       <div class="flex-1 min-w-0">
         <div class="text-sm break-words \${done ? 'line-through text-neutral-400 dark:text-neutral-600' : 'font-medium'}">\${esc(t.summary)}</div>
@@ -1160,10 +1195,12 @@ function renderResumen(node) {
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Total</div></div>
     </div>
   \`));
+  // Único momento de celebración de la app: la semana entera queda al 100%.
+  const complete = s.pct === 100;
   node.appendChild(el(\`
     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mt-3">
-      <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%</span></div>
-      <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
+      <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%\${complete ? ' 🎉' : ''}</span></div>
+      <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden\${complete ? ' pulse-once' : ''}"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
     </div>
   \`));
   const up = el('<div class="mt-4"><h3 class="text-sm font-medium mb-2">Próximas pendientes</h3><div class="space-y-2 stagger"></div></div>');
