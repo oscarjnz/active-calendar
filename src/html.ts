@@ -100,6 +100,28 @@ export function renderApp(env: Env): string {
   /* Checkboxes también son pulsables (picker de materias, tareas, wizard). */
   input[type="checkbox"] { transition: transform .12s var(--ease-out); }
   input[type="checkbox"]:active { transform: scale(0.85); }
+  /* Dropdowns propios: la flecha nativa del navegador (gris genérica, distinta en cada
+     SO/tema) no combina con el resto de la UI, así que se reemplaza por una consistente
+     con el trazo del logo y los demás iconos. El panel de opciones en sí lo sigue pintando
+     el navegador (no hay forma fiable de restylearlo entre navegadores sin reimplementar
+     el <select> a mano), pero ya hereda los colores correctos gracias a color-scheme. */
+  select {
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    cursor: pointer;
+    background-repeat: no-repeat;
+    background-position: right .65rem center;
+    background-size: .95rem;
+    padding-right: 2.1rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
+    transition: border-color .16s ease, box-shadow .16s var(--ease-out), background-color .16s ease;
+  }
+  html.dark select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
+  }
+  select::-ms-expand { display: none; }
+  /* Variante compacta: el select-etiqueta de "Asignar materia" en cada tarea, donde el
+     select grande queda desproporcionado. */
+  select.select-compact { background-position: right .4rem center; background-size: .7rem; padding-right: 1.3rem; }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
   /* Solo las cards realmente interactivas (ej. una tarea) se levantan al pasar el mouse;
      las cards contenedoras (ajustes, estados vacíos) se quedan quietas: no son clicables
@@ -1146,7 +1168,7 @@ function taskRow(t) {
     function buildSelect() {
       const first = cur ? '<option value="">— Sin materia</option>' : '<option value="">+ Asignar materia</option>';
       const body = optList.map(c => '<option value="'+esc(c.code)+'"'+((cur && cur.code && cur.code === normCode(c.code))?' selected':'')+'>'+esc(fmtCourse(c.code, c.name))+'</option>').join('');
-      const sel = el('<select class="pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 max-w-full min-w-0 truncate '+a.ring+'">'+first+body+'</select>');
+      const sel = el('<select class="select-compact pressable text-xs rounded-md border border-dashed border-neutral-300 dark:border-neutral-700 bg-transparent px-1.5 py-0.5 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 max-w-full min-w-0 truncate '+a.ring+'">'+first+body+'</select>');
       sel.addEventListener('change', async (e) => {
         const code = e.target.value || null;
         e.target.disabled = true;
