@@ -119,13 +119,6 @@ export function renderApp(env: Env): string {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
   }
   select::-ms-expand { display: none; }
-  /* Variante compacta: el select-etiqueta de "Asignar materia" en cada tarea. OJO: un
-     <select> nativo calcula su ancho en base a la opción MÁS LARGA de la lista (no la
-     seleccionada), sin importar appearance:none — por eso "width:fit-content" a secas no
-     alcanza (sigue dependiendo de ese mismo cálculo interno del navegador, e incluso varía
-     de un navegador a otro). Un max-width fijo en rem + la clase "truncate" que ya trae
-     (text-overflow:ellipsis) sí lo fuerza de forma confiable en cualquier navegador. */
-  select.select-compact { width: auto; max-width: 11rem; background-position: right .55rem center; background-size: .65rem; padding-right: 1.9rem; }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
   /* Solo las cards realmente interactivas (ej. una tarea) se levantan al pasar el mouse;
      las cards contenedoras (ajustes, estados vacíos) se quedan quietas: no son clicables
@@ -1131,6 +1124,59 @@ function byCourse() {
   });
 }
 
+// Dropdown propio (botón + panel flotante) para asignar/cambiar la materia de una tarea.
+// Reemplaza el <select> nativo: el ancho de un <select> lo determina el navegador en base
+// a la opción MÁS LARGA de la lista (no la seleccionada), sin importar appearance:none, y
+// ese cálculo varía entre navegadores — con un botón + panel propio tenemos control total.
+function courseMenu(t, optList, cur, a) {
+  const wrap = el('<div class="relative inline-block max-w-full min-w-0"></div>');
+  const label = cur ? fmtCourse(cur.code, cur.name) : '+ Asignar materia';
+  const chevron = '<svg viewBox="0 0 20 20" class="h-3 w-3 shrink-0 opacity-70" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5l5 5 5-5"/></svg>';
+  const btn = el('<button type="button" aria-haspopup="listbox" aria-expanded="false" class="pressable inline-flex items-center gap-1.5 text-xs font-medium rounded-full border border-transparent max-w-[11rem] min-w-0 '+a.chipBg+' '+a.chipText+' px-2.5 py-1 hover:brightness-95 dark:hover:brightness-125 focus:outline-none focus:ring-2 '+a.ring+'">'+
+    (cur ? '<span class="inline-block h-1.5 w-1.5 rounded-full shrink-0 '+a.dot+'"></span>' : '') +
+    '<span class="truncate">'+esc(label)+'</span>'+chevron+
+  '</button>');
+  wrap.appendChild(btn);
+
+  let panel = null;
+  let onDocClick = null;
+  function close() {
+    if (panel) { panel.remove(); panel = null; }
+    if (onDocClick) { document.removeEventListener('mousedown', onDocClick); onDocClick = null; }
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  function selectCourse(code) {
+    close();
+    btn.disabled = true;
+    api('/api/task', { method: 'POST', body: JSON.stringify({ uid: t.uid, course_code: code }) }).then(() => {
+      const local = state.tasks.find(x => x.uid === t.uid);
+      if (local) local.course_code = code;
+      renderTab();
+    }).catch(err => { alert('No se pudo asignar: ' + err.message); btn.disabled = false; });
+  }
+  function open() {
+    if (panel) return;
+    btn.setAttribute('aria-expanded', 'true');
+    const rows = [];
+    if (cur) rows.push({ code: '', label: '— Sin materia', clear: true });
+    for (const c of optList) rows.push({ code: c.code, label: fmtCourse(c.code, c.name), current: !!(cur && cur.code === normCode(c.code)) });
+    panel = el('<div role="listbox" class="fade-in absolute z-20 mt-1 left-0 min-w-[13rem] max-w-[18rem] max-h-64 overflow-y-auto bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-lg p-1"></div>');
+    for (const r of rows) {
+      const cls = r.current ? 'font-semibold ' + a.text : r.clear ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-700 dark:text-neutral-300';
+      const opt = el('<button type="button" role="option" class="pressable w-full text-left text-xs rounded-lg px-2.5 py-1.5 flex items-center gap-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 ' + cls + '"></button>');
+      opt.innerHTML = (r.clear ? '' : '<span class="inline-block h-1.5 w-1.5 rounded-full shrink-0 ' + a.dot + '"></span>') + '<span class="truncate">' + esc(r.label) + '</span>';
+      opt.addEventListener('click', () => { if (r.current) { close(); return; } selectCourse(r.code || null); });
+      panel.appendChild(opt);
+    }
+    wrap.appendChild(panel);
+    onDocClick = (e) => { if (!wrap.contains(e.target)) close(); };
+    setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
+  }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); if (panel) close(); else open(); });
+  wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  return wrap;
+}
+
 function taskRow(t) {
   const a = ac();
   const done = t.status === 'done';
@@ -1172,33 +1218,8 @@ function taskRow(t) {
     const optList = opts.slice();
     if (cur && cur.code && !optList.some(o => normCode(o.code) === cur.code)) optList.unshift({ code: cur.code, name: cur.name });
 
-    function buildSelect() {
-      const first = cur ? '<option value="">— Sin materia</option>' : '<option value="">+ Asignar materia</option>';
-      const body = optList.map(c => '<option value="'+esc(c.code)+'"'+((cur && cur.code && cur.code === normCode(c.code))?' selected':'')+'>'+esc(fmtCourse(c.code, c.name))+'</option>').join('');
-      const sel = el('<select class="select-compact pressable text-xs font-medium rounded-full border border-transparent '+a.chipBg+' '+a.chipText+' px-2.5 py-1 hover:brightness-95 dark:hover:brightness-125 focus:outline-none focus:ring-2 max-w-full min-w-0 truncate '+a.ring+'">'+first+body+'</select>');
-      sel.addEventListener('change', async (e) => {
-        const code = e.target.value || null;
-        e.target.disabled = true;
-        try {
-          await api('/api/task', { method: 'POST', body: JSON.stringify({ uid: t.uid, course_code: code }) });
-          const local = state.tasks.find(x => x.uid === t.uid);
-          if (local) local.course_code = code;
-          renderTab();
-        } catch (err) {
-          alert('No se pudo asignar: ' + err.message);
-          e.target.disabled = false;
-        }
-      });
-      return sel;
-    }
-
-    if (cur) {
-      // Materia asignada: chip con punto de color; clic para editarla.
-      const chip = el('<button type="button" title="Cambiar materia" class="pressable inline-flex items-center gap-1 max-w-full min-w-0 '+a.text+' hover:opacity-80"><span class="inline-block h-1.5 w-1.5 rounded-full shrink-0 '+a.dot+'"></span><span class="truncate">'+esc(fmtCourse(cur.code, cur.name))+'</span><span class="text-neutral-400 dark:text-neutral-500 text-[10px] shrink-0">✎</span></button>');
-      chip.addEventListener('click', () => { const s = buildSelect(); chip.replaceWith(s); s.focus(); });
-      slot.replaceWith(chip);
-    } else if (optList.length) {
-      slot.replaceWith(buildSelect());
+    if (cur || optList.length) {
+      slot.replaceWith(courseMenu(t, optList, cur, a));
     } else {
       slot.remove();
     }
