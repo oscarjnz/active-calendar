@@ -298,7 +298,6 @@ export const PREREQS: Record<string, PrereqGroup[]> = {
   TI3712: [['TI3110']],
   TI3502: [['TI3321']],
   TI3512: [['TI3321']],
-  TI3522: [['TI3502']], // depende de otra electiva del mismo track, no de una core
   TI3532: [['TI3321']],
 };
 
