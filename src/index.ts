@@ -205,6 +205,9 @@ async function maybeNotify(
  */
 async function notifyNewTasks(env: Env, profile: Profile, created: IcalEvent[]): Promise<void> {
   if (created.length === 0) return;
+  // Toggle en Ajustes: el estudiante puede optar por SOLO el resumen semanal
+  // (maybeNotify) y desactivar esta alerta instantánea sin tocar sus canales.
+  if (!profile.new_task_alerts) return;
   const wantEmail = !!(env.RESEND_API_KEY && profile.email && profile.email_notify);
   const wantTelegram = !!(env.TELEGRAM_BOT_TOKEN && profile.telegram_chat_id && profile.telegram_notify);
   if (!wantEmail && !wantTelegram) return;
@@ -364,6 +367,7 @@ export default {
           term?: number | null;
           courses?: { code: string; name: string }[];
           email_notify?: boolean;
+          new_task_alerts?: boolean;
           notify_dow?: number;
           notify_time?: string;
           telegram_notify?: boolean;

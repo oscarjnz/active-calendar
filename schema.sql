@@ -20,6 +20,7 @@ create table profiles (
   term int,                                 -- cuatrimestre/semestre actual (1-12)
   courses jsonb not null default '[]'::jsonb, -- materias: [{code,name}, ...]
   email_notify boolean not null default true, -- recibir recordatorio semanal por correo
+  new_task_alerts boolean not null default true, -- avisar al instante cuando hay tareas nuevas (además del resumen semanal)
   notify_dow int not null default 1,         -- día del envío (1=Lun..7=Dom)
   notify_time text not null default '07:00', -- hora local SDQ "HH:MM" del envío
   last_emailed timestamptz,                 -- último correo enviado (anti-duplicados)
@@ -96,6 +97,7 @@ alter table profiles add column if not exists completed_courses jsonb not null d
 -- (term_wizard_resolved_for), renómbrala en vez de correr la línea de abajo:
 --   alter table profiles rename column term_wizard_resolved_for to term_block_id;
 alter table profiles add column if not exists term_block_id text;
+alter table profiles add column if not exists new_task_alerts boolean not null default true;
 create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
 create index if not exists idx_profiles_tg_code on profiles(telegram_link_code) where telegram_link_code is not null;
 create index if not exists idx_profiles_notify on profiles(notify_dow) where email_notify or telegram_notify;

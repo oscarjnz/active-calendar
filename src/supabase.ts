@@ -97,6 +97,7 @@ export async function updateProfile(
     term?: number | null;
     courses?: Course[];
     email_notify?: boolean;
+    new_task_alerts?: boolean;
     notify_dow?: number;
     notify_time?: string;
     telegram_notify?: boolean;
@@ -108,6 +109,7 @@ export async function updateProfile(
   if ('display_name' in fields) patch.display_name = fields.display_name?.trim() || null;
   if ('ical_url' in fields) patch.ical_url = fields.ical_url?.trim() || null;
   if ('email_notify' in fields) patch.email_notify = !!fields.email_notify;
+  if ('new_task_alerts' in fields) patch.new_task_alerts = !!fields.new_task_alerts;
   if ('telegram_notify' in fields) patch.telegram_notify = !!fields.telegram_notify;
   if ('notify_dow' in fields) {
     const d = fields.notify_dow;
