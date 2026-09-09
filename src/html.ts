@@ -119,11 +119,13 @@ export function renderApp(env: Env): string {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
   }
   select::-ms-expand { display: none; }
-  /* Variante compacta: el select-etiqueta de "Asignar materia" en cada tarea, donde el
-     select grande queda desproporcionado. width:fit-content fuerza que se ajuste a su
-     contenido (como cualquier <select> nativo) en vez de estirarse a lo ancho de la fila
-     flex que lo contiene, que es lo que pasaba sin esto. */
-  select.select-compact { width: fit-content; max-width: 100%; background-position: right .4rem center; background-size: .7rem; padding-right: 1.3rem; }
+  /* Variante compacta: el select-etiqueta de "Asignar materia" en cada tarea. OJO: un
+     <select> nativo calcula su ancho en base a la opción MÁS LARGA de la lista (no la
+     seleccionada), sin importar appearance:none — por eso "width:fit-content" a secas no
+     alcanza (sigue dependiendo de ese mismo cálculo interno del navegador, e incluso varía
+     de un navegador a otro). Un max-width fijo en rem + la clase "truncate" que ya trae
+     (text-overflow:ellipsis) sí lo fuerza de forma confiable en cualquier navegador. */
+  select.select-compact { width: auto; max-width: 11rem; background-position: right .4rem center; background-size: .7rem; padding-right: 1.3rem; }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
   /* Solo las cards realmente interactivas (ej. una tarea) se levantan al pasar el mouse;
      las cards contenedoras (ajustes, estados vacíos) se quedan quietas: no son clicables
