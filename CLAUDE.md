@@ -113,5 +113,31 @@ manualmente o con `tsc` + revisión de lógica.
   del código para el tono — abundan notas tipo "OJO:" antes de trade-offs no obvios).
 - `normalizeCode()` (en `pensum.ts`) es la forma canónica de comparar códigos de materia:
   mayúsculas, sin guiones ni espacios.
-- El cron corre 3×/día (sync pesado) pero el chequeo de notificación corre en cada tick para
-  respetar la hora elegida por cada usuario — ver comentarios en `index.ts`.
+- El cron corre cada 30 min (un solo trigger `*/30 * * * *`) y en cada tick hace TODO:
+  sincroniza el iCal de cada usuario (`syncOne`), dispara la alerta instantánea de tareas
+  nuevas si aplica, y chequea el resumen semanal — ver `notificaciones` abajo.
+
+## Notificaciones: resumen semanal vs. alerta instantánea de tareas nuevas
+
+Hay dos mecanismos de notificación independientes, ambos en `index.ts`, evaluados en cada
+tick del cron (cada 30 min):
+
+- **`maybeNotify`** — el resumen semanal de siempre: un correo/Telegram por semana, el día y
+  hora que cada usuario eligió en Ajustes, con guard "ya enviado hoy" (`last_emailed` /
+  `last_telegram`) para no duplicar.
+- **`notifyNewTasks`** — alerta instantánea: se dispara apenas `syncOne` detecta tareas que
+  no existían antes (`computeDelta.created` en `diff.ts`). Si el profesor sube 15 tareas de
+  un tirón, todas caen en el mismo `sync` (cada 30 min) y se agrupan en **un solo**
+  correo/mensaje por canal (`sendNewTasksEmail` en `email.ts`, `sendNewTasksTelegram` en
+  `telegram.ts`) — nunca una notificación por tarea. No depende del día/hora elegidos por el
+  usuario (dispara apenas hay algo nuevo) ni necesita guard de "ya enviado hoy": es
+  idempotente porque `computeDelta` solo marca una tarea como `created` la primera vez que
+  aparece (tras `upsertEvents` ya queda como "existing" para el próximo sync). Respeta los
+  mismos toggles de canal que el resumen semanal (`email_notify` / `telegram_notify`).
+
+Antes el sync pesado (fetch + parse del iCal) solo corría 3×/día; ahora corre en los 48
+ticks/día del cron para poder detectar tareas nuevas casi en tiempo real. Si esto genera
+carga notable contra el feed de Blackboard de cada usuario, considerar separar de nuevo el
+sync en dos cadencias (una liviana solo para detectar `created` y otra pesada para
+backfill/descubrimiento de materias), pero por ahora un solo `syncOne` cada 30 min cubre
+todo.
