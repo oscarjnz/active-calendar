@@ -260,6 +260,24 @@ export default {
       });
     }
 
+    // SEO: deben responder ANTES del catch-all del SPA de abajo (si no, devolvería el
+    // HTML completo en vez de texto/XML plano). Solo se indexa "/" (el shell público de
+    // login/landing); /api/* queda excluido de crawling.
+    if (req.method === 'GET' && path === '/robots.txt') {
+      const base = (env.APP_BASE_URL || url.origin).replace(/\/$/, '');
+      const body = `User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${base}/sitemap.xml\n`;
+      return new Response(body, {
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=86400' },
+      });
+    }
+    if (req.method === 'GET' && path === '/sitemap.xml') {
+      const base = (env.APP_BASE_URL || url.origin).replace(/\/$/, '');
+      const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${base}/</loc></url>\n</urlset>\n`;
+      return new Response(body, {
+        headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=86400' },
+      });
+    }
+
     // SPA.
     if (req.method === 'GET' && !path.startsWith('/api/')) {
       return new Response(renderApp(env), {

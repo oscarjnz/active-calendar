@@ -19,6 +19,10 @@ export function renderApp(env: Env): string {
   // estudiante puede entrar recién empezado el bloque nuevo y de todas formas hay que
   // preguntarle).
   const blockId = JSON.stringify(currentBlockId());
+  // Base para URLs absolutas (canonical/OG). APP_BASE_URL siempre debería venir seteado
+  // (ver [vars] en wrangler.toml), el fallback es solo para dev local sin esa var.
+  const baseUrl = (env.APP_BASE_URL || 'https://activecalendar.site').replace(/\/$/, '');
+  const seoDescription = 'Active Calendar reúne tus tareas de Blackboard de la semana en una sola vista, agrupadas por materia, con recordatorios por correo y Telegram.';
 
   return `<!DOCTYPE html>
 <!--
@@ -33,7 +37,22 @@ export function renderApp(env: Env): string {
 <meta name="theme-color" content="#0a0a0a" />
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/favicon.svg" />
-<title>Active Calendar</title>
+<title>Active Calendar — Tus tareas de Blackboard organizadas por materia</title>
+<meta name="description" content="${seoDescription}" />
+<link rel="canonical" href="${baseUrl}/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Active Calendar" />
+<meta property="og:title" content="Active Calendar — Tus tareas de Blackboard organizadas por materia" />
+<meta property="og:description" content="${seoDescription}" />
+<meta property="og:url" content="${baseUrl}/" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Active Calendar — Tus tareas de Blackboard organizadas por materia" />
+<meta name="twitter:description" content="${seoDescription}" />
+<!-- OJO: reemplaza "PENDIENTE_EL_USUARIO_LO_LLENA" con el código real que da Google
+     Search Console al verificar la propiedad activecalendar.site (Configuración ->
+     Verificación de propiedad -> etiqueta HTML). Alternativa sin tocar código: verificar
+     por registro TXT en el DNS del dominio en vez de esta meta tag. -->
+<meta name="google-site-verification" content="PENDIENTE_EL_USUARIO_LO_LLENA" />
 <script>
   // Aplica el tema antes de pintar para evitar parpadeo.
   (function () {
