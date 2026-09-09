@@ -37,16 +37,16 @@ export function renderApp(env: Env): string {
 <meta name="theme-color" content="#0a0a0a" />
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/favicon.svg" />
-<title>Active Calendar — Tus tareas de Blackboard organizadas por materia</title>
+<title>Active Calendar: tus tareas de Blackboard organizadas por materia</title>
 <meta name="description" content="${seoDescription}" />
 <link rel="canonical" href="${baseUrl}/" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Active Calendar" />
-<meta property="og:title" content="Active Calendar — Tus tareas de Blackboard organizadas por materia" />
+<meta property="og:title" content="Active Calendar: tus tareas de Blackboard organizadas por materia" />
 <meta property="og:description" content="${seoDescription}" />
 <meta property="og:url" content="${baseUrl}/" />
 <meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="Active Calendar — Tus tareas de Blackboard organizadas por materia" />
+<meta name="twitter:title" content="Active Calendar: tus tareas de Blackboard organizadas por materia" />
 <meta name="twitter:description" content="${seoDescription}" />
 <!-- OJO: reemplaza "PENDIENTE_EL_USUARIO_LO_LLENA" con el código real que da Google
      Search Console al verificar la propiedad activecalendar.site (Configuración ->
