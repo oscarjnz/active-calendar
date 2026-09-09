@@ -1262,26 +1262,34 @@ function renderResumen(node) {
     return;
   }
   const upcoming = state.tasks.filter(t => t.status === 'pending').slice(0, 5);
-  node.appendChild(el(\`
-    <div class="grid grid-cols-3 gap-3">
-      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.pending}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Pendientes</div></div>
-      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.done}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Hechas</div></div>
-      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Total</div></div>
-    </div>
-  \`));
   // Único momento de celebración de la app: la semana entera queda al 100%.
   const complete = s.pct === 100;
-  node.appendChild(el(\`
-    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mt-3">
-      <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%\${complete ? ' 🎉' : ''}</span></div>
-      <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden\${complete ? ' pulse-once' : ''}"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
+  // Desde lg (laptop/desktop) hay espacio de sobra: stats+progreso a la izquierda,
+  // próximas pendientes a la derecha, en vez de una sola columna angosta con
+  // márgenes enormes a los lados. En mobile/tablet sigue apilado, igual que siempre.
+  const layout = el(\`
+    <div class="lg:grid lg:grid-cols-5 lg:gap-6 lg:items-start">
+      <div class="lg:col-span-2 space-y-3">
+        <div class="grid grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-3">
+          <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.pending}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Pendientes</div></div>
+          <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.done}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Hechas</div></div>
+          <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Total</div></div>
+        </div>
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4">
+          <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%\${complete ? ' 🎉' : ''}</span></div>
+          <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden\${complete ? ' pulse-once' : ''}"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
+        </div>
+      </div>
+      <div class="lg:col-span-3 mt-4 lg:mt-0">
+        <h3 class="text-sm font-medium mb-2">Próximas pendientes</h3>
+        <div class="space-y-2 stagger"></div>
+      </div>
     </div>
-  \`));
-  const up = el('<div class="mt-4"><h3 class="text-sm font-medium mb-2">Próximas pendientes</h3><div class="space-y-2 stagger"></div></div>');
-  const list = up.querySelector('div.space-y-2');
+  \`);
+  const list = layout.querySelector('div.space-y-2');
   if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Sin pendientes próximas. Vas al día.</p>'));
   else upcoming.forEach(t => list.appendChild(taskRow(t)));
-  node.appendChild(up);
+  node.appendChild(layout);
 }
 
 function renderMaterias(node) {
@@ -1613,7 +1621,7 @@ function renderShell() {
   root.innerHTML = '';
   const a = ac();
   const shell = el(\`
-    <div class="max-w-3xl mx-auto px-4 py-6">
+    <div class="max-w-3xl lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl mx-auto px-4 lg:px-8 py-6">
       <header class="flex items-center justify-between gap-3 mb-5">
         <div>
           <div class="text-neutral-400 dark:text-neutral-500 mb-1">\${brand('text-sm')}</div>
