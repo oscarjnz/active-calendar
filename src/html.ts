@@ -605,22 +605,76 @@ function fmtDue(iso) {
   return days[d.getUTCDay()] + ' ' + String(d.getUTCDate()).padStart(2,'0') + '/' + months[d.getUTCMonth()] +
          ' · ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
 }
-// Opciones del selector de "Rango de tareas" (Ajustes). Tope de 18 semanas (~4
-// meses): lo que dura un cuatrimestre completo, para que el ajuste nunca se
-// quede corto.
-const WEEKS_AHEAD_CHOICES = [1, 2, 3, 4, 6, 8, 12, 15, 18];
-function weeksAheadLabel(n) {
-  let label = n === 1 ? '1 semana (solo esta)' : n + ' semanas';
-  if (n >= 4) {
-    const months = Math.max(1, Math.round(n / 4.345));
-    label += ' (~' + months + (months === 1 ? ' mes' : ' meses') + ')';
-  }
-  if (n === 18) label += ' · cuatrimestre completo';
-  return label;
+// Día de la semana en SDQ, 0=Lun..6=Dom (coherente con time.ts en el Worker).
+function sdqDow(iso) {
+  const d = new Date(new Date(iso).getTime() - 4 * 3600 * 1000);
+  const wd = d.getUTCDay(); // 0=Dom..6=Sáb
+  return wd === 0 ? 6 : wd - 1;
 }
-function weeksAheadOptions(current) {
-  const values = WEEKS_AHEAD_CHOICES.includes(current) ? WEEKS_AHEAD_CHOICES : [...WEEKS_AHEAD_CHOICES, current].sort((a,b) => a-b);
-  return values.map(n => '<option value="'+n+'"'+(n===current?' selected':'')+'>'+esc(weeksAheadLabel(n))+'</option>').join('');
+// Número de semana de una fecha relativo al inicio de state.range (el lunes de
+// la semana actual): 0 = esta semana, 1 = la siguiente, etc.
+function weekIndexOf(iso, rangeStartIso) {
+  const day = 86400000;
+  const d = new Date(new Date(iso).getTime() - 4 * 3600 * 1000);
+  const s = new Date(new Date(rangeStartIso).getTime() - 4 * 3600 * 1000);
+  const d0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const s0 = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
+  return Math.floor((d0 - s0) / (7 * day));
+}
+// Control "Semana / Mes / Cuatrimestre" (estilo selector de rango de calendario):
+// mismo componente en Resumen y en Ajustes. Al elegir una opción guarda
+// weeks_ahead, resincroniza (para clasificar/guardar las semanas nuevas ya
+// mismo) y avisa a quien lo montó vía onDone/onError para que decida cómo
+// refrescar su pantalla.
+const RANGE_PRESETS = [[1, 'Semana'], [4, 'Mes'], [18, 'Cuatrimestre']];
+function rangeControl(current, onDone, onError) {
+  const a = ac();
+  const wrap = el('<div class="relative inline-flex bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-1 gap-0.5"></div>');
+  const thumb = el('<div class="absolute top-1 bottom-1 left-1 rounded-lg ' + a.bar + ' transition-all duration-300 [transition-timing-function:var(--ease-out)]" style="width:0"></div>');
+  wrap.appendChild(thumb);
+  const buttons = RANGE_PRESETS.map(([v, label]) => {
+    const btn = el('<button type="button" class="relative z-10 px-3.5 py-1.5 text-sm font-medium rounded-lg transition-colors duration-200"></button>');
+    btn.textContent = label;
+    btn.dataset.r = String(v);
+    wrap.appendChild(btn);
+    return btn;
+  });
+  function paint() {
+    buttons.forEach((b) => {
+      const on = parseInt(b.dataset.r, 10) === current;
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('text-neutral-600', !on);
+      b.classList.toggle('dark:text-neutral-300', !on);
+      if (on) {
+        thumb.style.width = b.offsetWidth + 'px';
+        thumb.style.transform = 'translateX(' + b.offsetLeft + 'px)';
+      }
+    });
+  }
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const weeks_ahead = parseInt(btn.dataset.r, 10);
+      if (weeks_ahead === current) return;
+      const prev = current;
+      current = weeks_ahead;
+      paint();
+      try {
+        await api('/api/profile', { method: 'POST', body: JSON.stringify({ weeks_ahead }) });
+        const s = await api('/api/sync', { method: 'POST' });
+        state.tasks = s.tasks || [];
+        const me = await api('/api/me');
+        state.profile = me.profile;
+        state.range = me.range;
+        onDone && onDone(me.profile);
+      } catch (err) {
+        current = prev;
+        paint();
+        onError ? onError('Error: ' + err.message) : alert('No se pudo cambiar el rango: ' + err.message);
+      }
+    });
+  });
+  setTimeout(paint, 0); // tras montarse en el DOM, para medir el ancho real de los botones
+  return wrap;
 }
 
 function rangeText(r) {
@@ -1271,9 +1325,59 @@ function weekBadge() {
     '<span class="inline-block h-1.5 w-1.5 rounded-full '+dot+'"></span>'+esc(label)+'</div>');
 }
 
+// "Ritmo de entregas": histograma de las mismas tareas de state.tasks, no datos
+// aparte. Con weeks_ahead=1 (Semana) cuenta por día (7 columnas, L a D, nunca se
+// ve vacío aunque varias tengan 0); con más semanas agrupa por semana completa.
+function renderRhythmCard() {
+  const a = ac();
+  const weeksAhead = (state.profile && state.profile.weeks_ahead) || 1;
+  const card = el('<div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mt-3"></div>');
+  const head = el('<div class="flex items-baseline justify-between gap-2 mb-3"><h3 class="text-sm font-medium">Ritmo de entregas</h3><span class="text-xs text-neutral-400 dark:text-neutral-500"></span></div>');
+  card.appendChild(head);
+  const bars = el('<div class="flex items-end gap-1.5" style="height:96px;"></div>');
+  card.appendChild(bars);
+
+  let cols; // [{ n, label, today }]
+  if (weeksAhead === 1) {
+    const dowLetters = ['L','M','M','J','V','S','D'];
+    const counts = new Array(7).fill(0);
+    state.tasks.forEach((t) => { if (t.due) counts[sdqDow(t.due)]++; });
+    const today = sdqDow(new Date().toISOString());
+    cols = counts.map((n, i) => ({ n, label: dowLetters[i], today: i === today }));
+    head.querySelector('span').textContent = 'Por día · esta semana';
+  } else {
+    const counts = new Array(weeksAhead).fill(0);
+    if (state.range && state.range.start) {
+      state.tasks.forEach((t) => {
+        if (!t.due) return;
+        const wi = weekIndexOf(t.due, state.range.start);
+        if (wi >= 0 && wi < weeksAhead) counts[wi]++;
+      });
+    }
+    cols = counts.map((n, i) => ({ n, label: i === 0 ? 'Hoy' : 'S' + (i + 1), today: i === 0 }));
+    head.querySelector('span').textContent = 'Por semana · ' + (weeksAhead === 18 ? 'todo el cuatrimestre' : 'próximas ' + weeksAhead + ' semanas');
+  }
+  const max = Math.max.apply(null, cols.map((c) => c.n).concat([1]));
+  cols.forEach((c) => {
+    const h = c.n === 0 ? 3 : Math.round((c.n / max) * 62) + 10;
+    const col = el('<div class="flex-1 min-w-0 flex flex-col items-center gap-1.5 h-full justify-end"></div>');
+    col.innerHTML =
+      '<div class="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">' + (c.n || '') + '</div>' +
+      '<div class="w-full max-w-[28px] rounded-md bg-neutral-100 dark:bg-neutral-800 flex items-end overflow-hidden" style="height:72px;">' +
+        '<div class="w-full rounded-md ' + (c.n > 0 ? a.bar : '') + '" style="height:' + h + 'px"></div>' +
+      '</div>' +
+      '<div class="text-[10px] ' + (c.today ? a.text + ' font-semibold' : 'text-neutral-400 dark:text-neutral-500') + '">' + esc(c.label) + '</div>';
+    bars.appendChild(col);
+  });
+  return card;
+}
+
 function renderResumen(node) {
   const a = ac();
   const s = stats();
+  const rangeRow = el('<div class="flex justify-end mb-3"></div>');
+  rangeRow.appendChild(rangeControl(state.profile.weeks_ahead || 1, () => renderShell()));
+  node.appendChild(rangeRow);
   const wb = weekBadge();
   if (wb) node.appendChild(wb);
   // Sin tareas esta semana -> modo vacaciones.
@@ -1322,6 +1426,7 @@ function renderResumen(node) {
   if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Sin pendientes próximas. Vas al día.</p>'));
   else upcoming.forEach(t => list.appendChild(taskRow(t)));
   node.appendChild(layout);
+  node.appendChild(renderRhythmCard());
 }
 
 function renderMaterias(node) {
@@ -1386,12 +1491,9 @@ function renderAjustes(node) {
       </div>
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <h3 class="font-medium">Rango de tareas</h3>
-        <p class="text-xs text-neutral-500 dark:text-neutral-400">Cuántas semanas quieres ver en Resumen, Materias y Todas (incluida la actual). Al guardar, sincronizamos de una vez para que las semanas nuevas aparezcan ya.</p>
+        <p class="text-xs text-neutral-500 dark:text-neutral-400">Cuánto quieres ver en Resumen, Materias y Todas (incluida la semana actual). Al elegir, sincronizamos de una vez para que aparezca ya.</p>
         <div class="flex flex-wrap items-center gap-3">
-          <select id="weeksAhead" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm \${a.ring} focus:outline-none focus:ring-2">
-            \${weeksAheadOptions(p.weeks_ahead || 1)}
-          </select>
-          <button id="saveWeeksAhead" class="pressable \${a.solid} text-white rounded-lg px-3 py-1.5 text-sm">Guardar</button>
+          <div id="rangeSlot"></div>
           <span id="wamsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
         </div>
       </div>
@@ -1485,24 +1587,11 @@ function renderAjustes(node) {
 
   // Rango de tareas: guarda y resincroniza al instante (si el estudiante amplió el
   // rango, las semanas nuevas necesitan pasar por el sync para clasificarse y guardarse).
-  const weeksAheadSel = card.querySelector('#weeksAhead');
   const wamsg = card.querySelector('#wamsg');
-  card.querySelector('#saveWeeksAhead').addEventListener('click', async (e) => {
-    const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
-    wamsg.textContent = '';
-    try {
-      const weeks_ahead = parseInt(weeksAheadSel.value, 10) || 1;
-      await api('/api/profile', { method: 'POST', body: JSON.stringify({ weeks_ahead }) });
-      const s = await api('/api/sync', { method: 'POST' });
-      state.tasks = s.tasks || [];
-      const me = await api('/api/me');
-      state.profile = me.profile;
-      state.range = me.range;
-      wamsg.textContent = 'Guardado y sincronizado.';
-      renderShell();
-    } catch (err) { wamsg.textContent = 'Error: ' + err.message; }
-    finally { btn.disabled = false; btn.textContent = old; }
-  });
+  card.querySelector('#rangeSlot').appendChild(rangeControl(p.weeks_ahead || 1, () => {
+    wamsg.textContent = 'Guardado y sincronizado.';
+    renderShell();
+  }, (msg) => { wamsg.textContent = msg; }));
   card.querySelector('#saveCourses').addEventListener('click', async (e) => {
     const cmsg = card.querySelector('#cmsg');
     const btn = e.currentTarget; btn.disabled = true;
