@@ -4,6 +4,9 @@ import { fetchClerkUser } from './clerk';
 import { normalizeCode, pensumName } from './pensum';
 
 const VALID_ACCENTS = ['neutral', 'indigo', 'emerald', 'rose', 'amber', 'sky'] as const;
+// Tope del rango "ver tareas de las próximas N semanas": ~4 meses, lo que dura un
+// cuatrimestre completo, para que el ajuste nunca se quede corto por cambios futuros.
+export const MAX_WEEKS_AHEAD = 18;
 
 /** Alias para el cliente de Supabase (lo usan otros módulos sin reimportar). */
 export type SbClient = SupabaseClient;
@@ -49,6 +52,7 @@ export async function ensureProfile(
     courses: [],
     completed_courses: [],
     term_block_id: null,
+    weeks_ahead: 1,
   };
   const { data, error } = await sb.from('profiles').insert(row).select('*').single();
   if (error) throw new Error(`profiles.insert: ${error.message}`);
@@ -103,6 +107,7 @@ export async function updateProfile(
     telegram_notify?: boolean;
     completed_courses?: string[];
     term_block_id?: string | null;
+    weeks_ahead?: number;
   },
 ): Promise<Profile> {
   const patch: Record<string, unknown> = {};
@@ -136,6 +141,11 @@ export async function updateProfile(
   }
   if ('term_block_id' in fields) {
     patch.term_block_id = fields.term_block_id?.trim() || null;
+  }
+  if ('weeks_ahead' in fields) {
+    const w = fields.weeks_ahead;
+    patch.weeks_ahead =
+      typeof w === 'number' && w >= 1 && w <= MAX_WEEKS_AHEAD ? Math.floor(w) : 1;
   }
   const { data, error } = await sb
     .from('profiles')
