@@ -47,6 +47,21 @@ export function currentWeekRangeSdq(now: Date = new Date()): { start: Date; end:
   return { start, end };
 }
 
+/**
+ * Igual que currentWeekRangeSdq, pero el fin se extiende `weeksAhead - 1` semanas
+ * más (weeksAhead=1 -> idéntico a la semana actual). Se usa para el ajuste de
+ * "ver tareas de las próximas N semanas".
+ */
+export function weeksAheadRangeSdq(
+  weeksAhead: number,
+  now: Date = new Date(),
+): { start: Date; end: Date } {
+  const { start } = currentWeekRangeSdq(now);
+  const n = Math.max(1, Math.floor(weeksAhead) || 1);
+  const end = new Date(start.getTime() + n * 7 * 86_400_000 - 1);
+  return { start, end };
+}
+
 const DAY_ABBR = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const MONTH_ABBR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 

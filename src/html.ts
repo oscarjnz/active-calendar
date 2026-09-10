@@ -382,8 +382,7 @@ function exportDocHtml() {
   let bodyHtml;
   if (!groups.length) {
     bodyHtml = '<div style="margin-top:40px;text-align:center;border:1px dashed #e0e0e0;border-radius:16px;padding:52px 24px;">'+
-      '<div style="font-size:40px;">🌴</div>'+
-      '<div style="margin-top:10px;font-size:16px;font-weight:600;">Semana despejada</div>'+
+      '<div style="font-size:16px;font-weight:600;">Semana despejada</div>'+
       '<div style="margin-top:4px;font-size:13px;color:#737373;">No hay tareas registradas para esta semana.</div></div>';
   } else {
     const statsHtml = '<div style="display:flex;gap:12px;margin-top:22px;">'+
@@ -606,6 +605,24 @@ function fmtDue(iso) {
   return days[d.getUTCDay()] + ' ' + String(d.getUTCDate()).padStart(2,'0') + '/' + months[d.getUTCMonth()] +
          ' · ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
 }
+// Opciones del selector de "Rango de tareas" (Ajustes). Tope de 18 semanas (~4
+// meses): lo que dura un cuatrimestre completo, para que el ajuste nunca se
+// quede corto.
+const WEEKS_AHEAD_CHOICES = [1, 2, 3, 4, 6, 8, 12, 15, 18];
+function weeksAheadLabel(n) {
+  let label = n === 1 ? '1 semana (solo esta)' : n + ' semanas';
+  if (n >= 4) {
+    const months = Math.max(1, Math.round(n / 4.345));
+    label += ' (~' + months + (months === 1 ? ' mes' : ' meses') + ')';
+  }
+  if (n === 18) label += ' · cuatrimestre completo';
+  return label;
+}
+function weeksAheadOptions(current) {
+  const values = WEEKS_AHEAD_CHOICES.includes(current) ? WEEKS_AHEAD_CHOICES : [...WEEKS_AHEAD_CHOICES, current].sort((a,b) => a-b);
+  return values.map(n => '<option value="'+n+'"'+(n===current?' selected':'')+'>'+esc(weeksAheadLabel(n))+'</option>').join('');
+}
+
 function rangeText(r) {
   if (!r) return '';
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
@@ -1089,6 +1106,22 @@ function renderCourseSetup() {
 }
 
 // ---------- render: app principal ----------
+// Cuando el estudiante pide ver más de 1 semana (Ajustes -> Rango de tareas),
+// varios textos que asumían "esta semana" pasan a hablar de "el periodo".
+function isMultiWeek() {
+  return !!(state.profile && (state.profile.weeks_ahead || 1) > 1);
+}
+function periodHeaderWord() { return isMultiWeek() ? 'Semanas' : 'Semana'; }
+function periodProgressLabel() { return isMultiWeek() ? 'Progreso del periodo' : 'Progreso de la semana'; }
+function periodClearTitle() { return isMultiWeek() ? 'Periodo despejado' : 'Semana despejada'; }
+function periodClearBody() {
+  return isMultiWeek()
+    ? 'No hay tareas en el periodo que elegiste ver. Si crees que deberías ver algo, sincroniza de nuevo o revisa tu enlace en Ajustes.'
+    : 'No hay tareas para esta semana. Si crees que deberías ver algo, sincroniza de nuevo o revisa tu enlace en Ajustes.';
+}
+function periodDoneBody() {
+  return isMultiWeek() ? 'Sin tareas en el periodo. Estás al día.' : 'Sin tareas esta semana. Estás al día.';
+}
 function stats() {
   const total = state.tasks.length;
   const done = state.tasks.filter(t => t.status === 'done').length;
@@ -1247,9 +1280,8 @@ function renderResumen(node) {
   if (s.total === 0) {
     node.appendChild(el(\`
       <div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-14">
-        <div class="text-5xl mb-3" aria-hidden="true">🌴</div>
-        <h2 class="text-xl font-semibold">Semana despejada</h2>
-        <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto">No hay tareas para esta semana. Si crees que deberías ver algo, sincroniza de nuevo o revisa tu enlace en Ajustes.</p>
+        <h2 class="text-xl font-semibold">\${periodClearTitle()}</h2>
+        <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto">\${periodClearBody()}</p>
         <button id="vacSync" class="\${a.solid} text-white text-sm rounded-lg px-4 py-2 mt-6">Sincronizar ahora</button>
       </div>
     \`));
@@ -1276,7 +1308,7 @@ function renderResumen(node) {
           <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.total}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Total</div></div>
         </div>
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4">
-          <div class="flex justify-between text-sm mb-2"><span class="font-medium">Progreso de la semana</span><span class="\${a.text} font-semibold">\${s.pct}%\${complete ? ' 🎉' : ''}</span></div>
+          <div class="flex justify-between text-sm mb-2"><span class="font-medium">\${periodProgressLabel()}</span><span class="\${a.text} font-semibold">\${s.pct}%</span></div>
           <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden\${complete ? ' pulse-once' : ''}"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
         </div>
       </div>
@@ -1296,7 +1328,7 @@ function renderMaterias(node) {
   const a = ac();
   const groups = byCourse();
   if (groups.length === 0) {
-    node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><div class="text-4xl mb-2" aria-hidden="true">🌴</div><p class="text-sm text-neutral-500 dark:text-neutral-400">Sin tareas esta semana. Estás al día.</p></div>'));
+    node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><p class="text-sm text-neutral-500 dark:text-neutral-400">'+esc(periodDoneBody())+'</p></div>'));
     return;
   }
   for (const g of groups) {
@@ -1351,6 +1383,17 @@ function renderAjustes(node) {
         <h3 class="font-medium">Calendario de Blackboard</h3>
         <label class="block text-sm">URL iCal</label>
         <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
+      </div>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
+        <h3 class="font-medium">Rango de tareas</h3>
+        <p class="text-xs text-neutral-500 dark:text-neutral-400">Cuántas semanas quieres ver en Resumen, Materias y Todas (incluida la actual). Al guardar, sincronizamos de una vez para que las semanas nuevas aparezcan ya.</p>
+        <div class="flex flex-wrap items-center gap-3">
+          <select id="weeksAhead" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-1.5 text-sm \${a.ring} focus:outline-none focus:ring-2">
+            \${weeksAheadOptions(p.weeks_ahead || 1)}
+          </select>
+          <button id="saveWeeksAhead" class="pressable \${a.solid} text-white rounded-lg px-3 py-1.5 text-sm">Guardar</button>
+          <span id="wamsg" class="text-xs text-neutral-400 dark:text-neutral-500"></span>
+        </div>
       </div>
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <div class="flex items-start justify-between gap-4">
@@ -1439,6 +1482,27 @@ function renderAjustes(node) {
   const picker = coursePicker(selected, p.term || null, completedSet);
   card.querySelector('#pickerSlot').appendChild(picker);
   card.querySelector('#termWizardBtn').addEventListener('click', () => termWizardStep2());
+
+  // Rango de tareas: guarda y resincroniza al instante (si el estudiante amplió el
+  // rango, las semanas nuevas necesitan pasar por el sync para clasificarse y guardarse).
+  const weeksAheadSel = card.querySelector('#weeksAhead');
+  const wamsg = card.querySelector('#wamsg');
+  card.querySelector('#saveWeeksAhead').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
+    wamsg.textContent = '';
+    try {
+      const weeks_ahead = parseInt(weeksAheadSel.value, 10) || 1;
+      await api('/api/profile', { method: 'POST', body: JSON.stringify({ weeks_ahead }) });
+      const s = await api('/api/sync', { method: 'POST' });
+      state.tasks = s.tasks || [];
+      const me = await api('/api/me');
+      state.profile = me.profile;
+      state.range = me.range;
+      wamsg.textContent = 'Guardado y sincronizado.';
+      renderShell();
+    } catch (err) { wamsg.textContent = 'Error: ' + err.message; }
+    finally { btn.disabled = false; btn.textContent = old; }
+  });
   card.querySelector('#saveCourses').addEventListener('click', async (e) => {
     const cmsg = card.querySelector('#cmsg');
     const btn = e.currentTarget; btn.disabled = true;
@@ -1664,7 +1728,7 @@ function renderShell() {
         <div>
           <div class="text-neutral-400 dark:text-neutral-500 mb-1">\${brand('text-sm')}</div>
           <h1 class="text-xl font-semibold leading-tight">Hola, \${esc(state.profile.display_name||'')}</h1>
-          <p class="text-xs text-neutral-500 dark:text-neutral-400">Semana \${esc(rangeText(state.range))}</p>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">\${periodHeaderWord()} \${esc(rangeText(state.range))}</p>
         </div>
         <div class="flex items-center gap-2">
           <button id="exportBtn" title="Exportar tareas" class="pressable border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 text-sm rounded-lg px-3 py-2 inline-flex items-center gap-1.5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span class="hidden sm:inline">Exportar</span></button>

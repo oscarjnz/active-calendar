@@ -23,7 +23,7 @@ import {
   upsertEvents,
 } from './supabase';
 import { getAuthUserId } from './clerk';
-import { currentAcademicWeek, currentWeekRangeSdq, toSdqParts } from './time';
+import { currentAcademicWeek, currentWeekRangeSdq, toSdqParts, weeksAheadRangeSdq } from './time';
 import { sendNewTasksEmail, sendWeeklyEmail } from './email';
 import { handleTelegramUpdate, newLinkCode, sendNewTasksTelegram, sendWeeklyTelegram } from './telegram';
 import { renderApp } from './html';
@@ -96,8 +96,11 @@ async function syncOne(
     await setProfileCourses(sb, profile.user_id, courses);
   }
 
-  // 2) Solo las tareas/entregas (no las sesiones) se guardan como tareas.
-  const { start, end } = currentWeekRangeSdq();
+  // 2) Solo las tareas/entregas (no las sesiones) se guardan como tareas. El rango
+  // llega hasta `weeks_ahead` semanas (ajuste del estudiante en Ajustes), no solo
+  // la semana actual — el feed completo ya se descargó igual, así que ampliar el
+  // rango no cuesta más.
+  const { start, end } = weeksAheadRangeSdq(profile.weeks_ahead);
   const inWeek = filterInRange(all, start, end).filter((ev) => !ev.isSession);
   // Derivar la materia de cada tarea contra las materias matriculadas.
   for (const ev of inWeek) {
@@ -348,7 +351,7 @@ export default {
         const profile = await ensureProfile(sb, env, u);
         // Auto-saneo de materias viejas (rellena nombres del pensum, quita las sin nombre).
         profile.courses = await cleanupProfileCourses(sb, profile);
-        const { start, end } = currentWeekRangeSdq();
+        const { start, end } = weeksAheadRangeSdq(profile.weeks_ahead);
         const tasks = await listWeekTasks(sb, u, start, end);
         return json({ profile, tasks, range: { start: start.toISOString(), end: end.toISOString() } });
       } catch (err) {
@@ -373,6 +376,7 @@ export default {
           telegram_notify?: boolean;
           completed_courses?: string[];
           term_block_id?: string | null;
+          weeks_ahead?: number;
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });
@@ -466,7 +470,7 @@ export default {
           return json({ error: 'profile missing ical_url' }, { status: 400 });
         }
         const result = await syncOne(env, profile);
-        const { start, end } = currentWeekRangeSdq();
+        const { start, end } = weeksAheadRangeSdq(profile.weeks_ahead);
         const tasks = await listWeekTasks(sb, u, start, end);
         return json({ weekCount: result.weekCount, created: result.created.length, modified: result.modified, tasks });
       } catch (err) {
