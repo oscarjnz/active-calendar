@@ -4,6 +4,7 @@ import { fetchClerkUser } from './clerk';
 import { normalizeCode, pensumName } from './pensum';
 
 const VALID_ACCENTS = ['neutral', 'indigo', 'emerald', 'rose', 'amber', 'sky'] as const;
+const VALID_RHYTHM_CHARTS = ['bars', 'heatmap', 'stacked', 'chips'] as const;
 // Tope del rango "ver tareas de las próximas N semanas": ~4 meses, lo que dura un
 // cuatrimestre completo, para que el ajuste nunca se quede corto por cambios futuros.
 export const MAX_WEEKS_AHEAD = 18;
@@ -53,6 +54,7 @@ export async function ensureProfile(
     completed_courses: [],
     term_block_id: null,
     weeks_ahead: 1,
+    rhythm_chart: 'bars',
   };
   const { data, error } = await sb.from('profiles').insert(row).select('*').single();
   if (error) throw new Error(`profiles.insert: ${error.message}`);
@@ -108,6 +110,7 @@ export async function updateProfile(
     completed_courses?: string[];
     term_block_id?: string | null;
     weeks_ahead?: number;
+    rhythm_chart?: string;
   },
 ): Promise<Profile> {
   const patch: Record<string, unknown> = {};
@@ -146,6 +149,11 @@ export async function updateProfile(
     const w = fields.weeks_ahead;
     patch.weeks_ahead =
       typeof w === 'number' && w >= 1 && w <= MAX_WEEKS_AHEAD ? Math.floor(w) : 1;
+  }
+  if ('rhythm_chart' in fields && fields.rhythm_chart) {
+    patch.rhythm_chart = (VALID_RHYTHM_CHARTS as readonly string[]).includes(fields.rhythm_chart)
+      ? fields.rhythm_chart
+      : 'bars';
   }
   const { data, error } = await sb
     .from('profiles')

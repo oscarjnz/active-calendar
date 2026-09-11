@@ -377,6 +377,7 @@ export default {
           completed_courses?: string[];
           term_block_id?: string | null;
           weeks_ahead?: number;
+          rhythm_chart?: string;
         };
         const profile = await updateProfile(sb, u, body);
         return json({ profile });
