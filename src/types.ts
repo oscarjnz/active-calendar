@@ -56,6 +56,7 @@ export interface Profile {
   completed_courses: string[]; // códigos de materias ya aprobadas (acumulado entre cuatrimestres)
   term_block_id: string | null; // id de bloque ("YYYY-B") para el que term/courses ya está al día
   weeks_ahead: number; // cuántas semanas (incl. la actual) mostrar/sincronizar (1-18)
+  rhythm_chart: string; // estilo del gráfico "Ritmo de entregas": 'bars' | 'heatmap' | 'stacked' | 'chips'
   created_at: string;
   updated_at: string;
 }

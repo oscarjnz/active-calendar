@@ -248,6 +248,20 @@ const ACCENT_HEX = { neutral: '#0a0a0a', indigo: '#4f46e5', emerald: '#059669', 
 function ac() { return ACCENTS[state.profile?.accent] || ACCENTS.neutral; }
 function acHex() { return ACCENT_HEX[state.profile && state.profile.accent] || ACCENT_HEX.neutral; }
 
+// Estilos disponibles para "Ritmo de entregas" (ver renderRhythmCard). El icono
+// de cada uno es una mini-versión del propio gráfico, coloreada con currentColor
+// para heredar el acento del selector (ver picker en renderAjustes).
+const RHYTHM_STYLES = [
+  { key: 'bars', label: 'Barras',
+    icon: '<div class="flex items-end gap-0.5 h-6"><div class="w-1.5 rounded-sm bg-current" style="height:35%"></div><div class="w-1.5 rounded-sm bg-current" style="height:85%"></div><div class="w-1.5 rounded-sm bg-current" style="height:55%"></div><div class="w-1.5 rounded-sm bg-current" style="height:20%"></div></div>' },
+  { key: 'heatmap', label: 'Mapa de calor',
+    icon: '<div class="grid grid-cols-3 gap-0.5 h-6 w-7"><div class="rounded-[2px] bg-current opacity-20"></div><div class="rounded-[2px] bg-current opacity-60"></div><div class="rounded-[2px] bg-current opacity-90"></div><div class="rounded-[2px] bg-current opacity-40"></div><div class="rounded-[2px] bg-current opacity-20"></div><div class="rounded-[2px] bg-current opacity-70"></div></div>' },
+  { key: 'stacked', label: 'Apiladas por materia',
+    icon: '<div class="flex items-end gap-0.5 h-6"><div class="w-1.5 rounded-sm bg-current opacity-30" style="height:30%"></div><div class="w-1.5 rounded-sm flex flex-col-reverse overflow-hidden" style="height:85%"><div class="flex-1 bg-current opacity-100"></div><div class="flex-1 bg-current opacity-50"></div></div><div class="w-1.5 rounded-sm flex flex-col-reverse overflow-hidden" style="height:60%"><div class="flex-1 bg-current opacity-80"></div><div class="flex-1 bg-current opacity-30"></div></div><div class="w-1.5 rounded-sm bg-current opacity-70" style="height:20%"></div></div>' },
+  { key: 'chips', label: 'Chips',
+    icon: '<div class="flex items-center gap-1 h-6"><div class="h-5 w-5 rounded-md bg-current opacity-90"></div><div class="h-5 w-5 rounded-md bg-current opacity-30"></div><div class="h-5 w-5 rounded-md bg-current opacity-60"></div></div>' },
+];
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
@@ -1325,50 +1339,268 @@ function weekBadge() {
     '<span class="inline-block h-1.5 w-1.5 rounded-full '+dot+'"></span>'+esc(label)+'</div>');
 }
 
+// Paleta fija (no el acento de la app, que es único y compartido) para distinguir
+// materias en la variante "apiladas por materia" de Ritmo de entregas.
+const RHYTHM_COURSE_PALETTE = ['#0284c7', '#059669', '#d97706', '#e11d48', '#7c3aed', '#0891b2', '#65a30d', '#db2777'];
+function rhythmCourseColor(key) {
+  if (!key) return '#a3a3a3'; // "Sin materia"
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return RHYTHM_COURSE_PALETTE[h % RHYTHM_COURSE_PALETTE.length];
+}
+function hexToRgba(hex, alpha) {
+  const v = hex.replace('#', '');
+  const r = parseInt(v.slice(0, 2), 16), g = parseInt(v.slice(2, 4), 16), b = parseInt(v.slice(4, 6), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
 // "Ritmo de entregas": histograma de las mismas tareas de state.tasks, no datos
 // aparte. Con weeks_ahead=1 (Semana) cuenta por día (7 columnas, L a D, nunca se
 // ve vacío aunque varias tengan 0); con más semanas agrupa por semana completa.
-function renderRhythmCard() {
-  const a = ac();
+// Calcula, además del total por columna, el desglose por materia (para la
+// variante apilada) y una matriz día-de-semana x semana (para el mapa de calor
+// en la vista de varias semanas, orientación estilo GitHub).
+function rhythmData() {
   const weeksAhead = (state.profile && state.profile.weeks_ahead) || 1;
+  function addToBucket(map, t) {
+    const c = taskCourse(t);
+    const key = c ? (c.code || c.name) : null;
+    const label = c ? fmtCourse(c.code, c.name) : 'Sin materia';
+    const cur = map.get(key) || { key, label, n: 0 };
+    cur.n++;
+    map.set(key, cur);
+  }
+  function finalizeBucket(map) {
+    return [...map.values()]
+      .map((v) => ({ ...v, color: rhythmCourseColor(v.key) }))
+      .sort((x, y) => (x.key === null ? 1 : y.key === null ? -1 : x.label.localeCompare(y.label, 'es')));
+  }
+  if (weeksAhead === 1) {
+    const dowLetters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+    const counts = new Array(7).fill(0);
+    const byDay = Array.from({ length: 7 }, () => new Map());
+    state.tasks.forEach((t) => {
+      if (!t.due) return;
+      const d = sdqDow(t.due);
+      counts[d]++;
+      addToBucket(byDay[d], t);
+    });
+    const today = sdqDow(new Date().toISOString());
+    const cols = counts.map((n, i) => ({ n, label: dowLetters[i], today: i === today }));
+    return { weeksAhead, cols, breakdown: byDay.map(finalizeBucket), matrix: null, unitLabel: 'Por día · esta semana' };
+  }
+  const counts = new Array(weeksAhead).fill(0);
+  const byWeek = Array.from({ length: weeksAhead }, () => new Map());
+  const matrix = Array.from({ length: 7 }, () => new Array(weeksAhead).fill(0));
+  if (state.range && state.range.start) {
+    state.tasks.forEach((t) => {
+      if (!t.due) return;
+      const wi = weekIndexOf(t.due, state.range.start);
+      if (wi < 0 || wi >= weeksAhead) return;
+      counts[wi]++;
+      matrix[sdqDow(t.due)][wi]++;
+      addToBucket(byWeek[wi], t);
+    });
+  }
+  const cols = counts.map((n, i) => ({ n, label: i === 0 ? 'Hoy' : 'S' + (i + 1), today: i === 0 }));
+  return {
+    weeksAhead, cols, breakdown: byWeek.map(finalizeBucket), matrix,
+    unitLabel: 'Por semana · ' + (weeksAhead === 18 ? 'todo el cuatrimestre' : 'próximas ' + weeksAhead + ' semanas'),
+  };
+}
+
+// Variante A (default): las barras de siempre. Con más de 8 columnas (solo pasa
+// en la vista de cuatrimestre, 18 semanas) se agregan flechas de paginado en vez
+// de encoger cada barra hasta que dejan de leerse.
+function renderRhythmBars(container, data) {
+  const a = ac();
+  const WINDOW = 8;
+  const needsWindow = data.cols.length > WINDOW;
+  let offset = Math.max(0, data.cols.length - WINDOW);
+  const wrap = el('<div class="flex items-stretch gap-2"></div>');
+  let prevBtn, nextBtn;
+  if (needsWindow) {
+    const nav = el('<div class="flex flex-col gap-1 justify-center"></div>');
+    prevBtn = el('<button type="button" class="h-6 w-6 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs flex items-center justify-center disabled:opacity-30">‹</button>');
+    nextBtn = el('<button type="button" class="h-6 w-6 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs flex items-center justify-center disabled:opacity-30">›</button>');
+    nav.appendChild(prevBtn); nav.appendChild(nextBtn);
+    wrap.appendChild(nav);
+  }
+  const chartBox = el('<div class="flex-1 min-w-0"></div>');
+  wrap.appendChild(chartBox);
+  container.appendChild(wrap);
+
+  function draw() {
+    chartBox.innerHTML = '';
+    const slice = needsWindow ? data.cols.slice(offset, offset + WINDOW) : data.cols;
+    const max = Math.max.apply(null, slice.map((c) => c.n).concat([1]));
+    const row = el('<div class="flex items-end gap-1.5" style="height:96px;"></div>');
+    slice.forEach((c) => {
+      const h = c.n === 0 ? 3 : Math.round((c.n / max) * 62) + 10;
+      const col = el('<div class="flex-1 min-w-0 flex flex-col items-center gap-1.5 h-full justify-end"></div>');
+      col.innerHTML =
+        '<div class="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">' + (c.n || '') + '</div>' +
+        '<div class="w-full max-w-[28px] rounded-md bg-neutral-100 dark:bg-neutral-800 flex items-end overflow-hidden" style="height:72px;">' +
+          '<div class="w-full rounded-md ' + (c.n > 0 ? a.bar : '') + '" style="height:' + h + 'px"></div>' +
+        '</div>' +
+        '<div class="text-[10px] ' + (c.today ? a.text + ' font-semibold' : 'text-neutral-400 dark:text-neutral-500') + '">' + esc(c.label) + '</div>';
+      row.appendChild(col);
+    });
+    chartBox.appendChild(row);
+    if (needsWindow) { prevBtn.disabled = offset <= 0; nextBtn.disabled = offset + WINDOW >= data.cols.length; }
+  }
+  if (needsWindow) {
+    prevBtn.addEventListener('click', () => { offset = Math.max(0, offset - WINDOW); draw(); });
+    nextBtn.addEventListener('click', () => { offset = Math.min(data.cols.length - WINDOW, offset + WINDOW); draw(); });
+  }
+  draw();
+}
+
+// Variante B: mapa de calor. En la vista de un día es una fila simple de 7
+// celdas; en la de varias semanas usa la orientación real de GitHub/Notion
+// (semanas en columnas, días en filas), que nunca se angosta con más columnas.
+function renderRhythmHeatmap(container, data) {
+  const a = ac();
+  const accent = acHex();
+  if (!data.matrix) {
+    const max = Math.max.apply(null, data.cols.map((c) => c.n).concat([1]));
+    const row = el('<div class="flex gap-1.5"></div>');
+    data.cols.forEach((c) => {
+      const alpha = c.n === 0 ? 0.08 : 0.22 + (c.n / max) * 0.68;
+      const wrap = el('<div class="flex flex-col items-center gap-1"></div>');
+      wrap.innerHTML =
+        '<div class="h-7 w-7 rounded-md" style="background:' + hexToRgba(accent, alpha) + '" title="' + esc(c.label) + ': ' + c.n + ' tareas"></div>' +
+        '<div class="text-[10px] ' + (c.today ? a.text + ' font-semibold' : 'text-neutral-400 dark:text-neutral-500') + '">' + esc(c.label) + '</div>';
+      row.appendChild(wrap);
+    });
+    container.appendChild(row);
+    return;
+  }
+  const dowLetters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+  const max = Math.max.apply(null, data.matrix.reduce((acc, row) => acc.concat(row), []).concat([1]));
+  const wrap = el('<div class="flex gap-2 overflow-x-auto pb-1"></div>');
+  const daysCol = el('<div class="flex flex-col gap-1 shrink-0" style="padding-top:18px;"></div>');
+  dowLetters.forEach((d, i) => daysCol.appendChild(el('<span class="block h-3.5 text-[9px] leading-[14px] text-neutral-400 dark:text-neutral-500">' + (i % 2 === 0 ? d : '') + '</span>')));
+  wrap.appendChild(daysCol);
+  const grid = el('<div class="grid gap-1"></div>');
+  grid.style.gridAutoFlow = 'column';
+  grid.style.gridTemplateRows = 'repeat(7,14px)';
+  for (let w = 0; w < data.weeksAhead; w++) {
+    for (let d = 0; d < 7; d++) {
+      const n = data.matrix[d][w];
+      const alpha = n === 0 ? 0.08 : 0.22 + (n / max) * 0.68;
+      const cell = el('<div class="h-3.5 w-3.5 rounded-[3px]"></div>');
+      cell.style.background = hexToRgba(accent, alpha);
+      cell.title = (w === 0 ? 'Hoy' : 'S' + (w + 1)) + ' · ' + dowLetters[d] + ': ' + n + ' tareas';
+      grid.appendChild(cell);
+    }
+  }
+  wrap.appendChild(grid);
+  container.appendChild(wrap);
+  const legend = el('<div class="flex items-center gap-1 mt-2 text-[10px] text-neutral-400 dark:text-neutral-500"></div>');
+  legend.innerHTML = '<span>Menos</span>' + [0.08, 0.3, 0.55, 0.95].map((al) => '<span class="inline-block h-2 w-2 rounded-sm mx-0.5" style="background:' + hexToRgba(accent, al) + '"></span>').join('') + '<span>Más</span>';
+  container.appendChild(legend);
+}
+
+// Variante C: barras apiladas por materia (cada segmento, un color fijo de
+// RHYTHM_COURSE_PALETTE). El promedio del período va como texto en el
+// encabezado (ver renderRhythmCard), no como línea superpuesta: una línea
+// punteada posicionada a pixel exacto es frágil entre tamaños de fuente/pantalla.
+function renderRhythmStacked(container, data) {
+  const a = ac();
+  const WINDOW = 8;
+  const needsWindow = data.cols.length > WINDOW;
+  let offset = Math.max(0, data.cols.length - WINDOW);
+  const wrap = el('<div class="flex items-stretch gap-2"></div>');
+  let prevBtn, nextBtn;
+  if (needsWindow) {
+    const nav = el('<div class="flex flex-col gap-1 justify-center"></div>');
+    prevBtn = el('<button type="button" class="h-6 w-6 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs flex items-center justify-center disabled:opacity-30">‹</button>');
+    nextBtn = el('<button type="button" class="h-6 w-6 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs flex items-center justify-center disabled:opacity-30">›</button>');
+    nav.appendChild(prevBtn); nav.appendChild(nextBtn);
+    wrap.appendChild(nav);
+  }
+  const chartBox = el('<div class="flex-1 min-w-0"></div>');
+  wrap.appendChild(chartBox);
+  container.appendChild(wrap);
+
+  function draw() {
+    chartBox.innerHTML = '';
+    const cols = needsWindow ? data.cols.slice(offset, offset + WINDOW) : data.cols;
+    const breakdown = needsWindow ? data.breakdown.slice(offset, offset + WINDOW) : data.breakdown;
+    const max = Math.max.apply(null, cols.map((c) => c.n).concat([1]));
+    const row = el('<div class="flex items-end gap-1.5" style="height:96px;"></div>');
+    cols.forEach((c, i) => {
+      const seg = breakdown[i];
+      const h = c.n === 0 ? 3 : Math.round((c.n / max) * 62) + 10;
+      const col = el('<div class="flex-1 min-w-0 flex flex-col items-center gap-1.5 h-full justify-end"></div>');
+      const track = el('<div class="w-full max-w-[28px] rounded-md bg-neutral-100 dark:bg-neutral-800 flex items-end overflow-hidden" style="height:72px;"></div>');
+      const fill = el('<div class="w-full rounded-md flex flex-col-reverse overflow-hidden" style="height:' + h + 'px"></div>');
+      seg.forEach((s) => {
+        const part = el('<div class="w-full" style="height:' + Math.round((s.n / Math.max(c.n, 1)) * 100) + '%; background:' + s.color + ';"></div>');
+        part.title = esc(s.label) + ': ' + s.n;
+        fill.appendChild(part);
+      });
+      track.appendChild(fill);
+      col.innerHTML = '<div class="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">' + (c.n || '') + '</div>';
+      col.appendChild(track);
+      col.appendChild(el('<div class="text-[10px] ' + (c.today ? a.text + ' font-semibold' : 'text-neutral-400 dark:text-neutral-500') + '">' + esc(c.label) + '</div>'));
+      row.appendChild(col);
+    });
+    chartBox.appendChild(row);
+    if (needsWindow) { prevBtn.disabled = offset <= 0; nextBtn.disabled = offset + WINDOW >= data.cols.length; }
+  }
+  if (needsWindow) {
+    prevBtn.addEventListener('click', () => { offset = Math.max(0, offset - WINDOW); draw(); });
+    nextBtn.addEventListener('click', () => { offset = Math.min(data.cols.length - WINDOW, offset + WINDOW); draw(); });
+  }
+  draw();
+
+  const seen = new Map();
+  data.breakdown.forEach((col) => col.forEach((s) => { if (s.n > 0 && !seen.has(s.label)) seen.set(s.label, s.color); }));
+  if (seen.size) {
+    const legend = el('<div class="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px] text-neutral-500 dark:text-neutral-400"></div>');
+    [...seen.entries()].forEach(([label, color]) => {
+      legend.appendChild(el('<span class="inline-flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-sm" style="background:' + color + '"></span>' + esc(label) + '</span>'));
+    });
+    container.appendChild(legend);
+  }
+}
+
+// Variante D: chips de racha (una píldora sólida por columna, apagada si n=0).
+function renderRhythmChips(container, data) {
+  const a = ac();
+  const wrap = el('<div class="flex flex-wrap gap-2"></div>');
+  data.cols.forEach((c) => {
+    const chip = el('<div class="flex flex-col items-center gap-1"></div>');
+    chip.innerHTML =
+      '<div class="h-8 w-8 rounded-lg flex items-center justify-center text-xs font-semibold font-mono ' +
+        (c.n > 0 ? a.bar + ' text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500') +
+      '" title="' + esc(c.label) + ': ' + c.n + ' tareas">' + (c.n || '·') + '</div>' +
+      '<div class="text-[10px] ' + (c.today ? a.text + ' font-semibold' : 'text-neutral-400 dark:text-neutral-500') + '">' + esc(c.label) + '</div>';
+    wrap.appendChild(chip);
+  });
+  container.appendChild(wrap);
+}
+
+function renderRhythmCard() {
+  const data = rhythmData();
+  const style = (state.profile && state.profile.rhythm_chart) || 'bars';
   const card = el('<div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mt-3"></div>');
   const head = el('<div class="flex items-baseline justify-between gap-2 mb-3"><h3 class="text-sm font-medium">Ritmo de entregas</h3><span class="text-xs text-neutral-400 dark:text-neutral-500"></span></div>');
-  card.appendChild(head);
-  const bars = el('<div class="flex items-end gap-1.5" style="height:96px;"></div>');
-  card.appendChild(bars);
-
-  let cols; // [{ n, label, today }]
-  if (weeksAhead === 1) {
-    const dowLetters = ['L','M','M','J','V','S','D'];
-    const counts = new Array(7).fill(0);
-    state.tasks.forEach((t) => { if (t.due) counts[sdqDow(t.due)]++; });
-    const today = sdqDow(new Date().toISOString());
-    cols = counts.map((n, i) => ({ n, label: dowLetters[i], today: i === today }));
-    head.querySelector('span').textContent = 'Por día · esta semana';
-  } else {
-    const counts = new Array(weeksAhead).fill(0);
-    if (state.range && state.range.start) {
-      state.tasks.forEach((t) => {
-        if (!t.due) return;
-        const wi = weekIndexOf(t.due, state.range.start);
-        if (wi >= 0 && wi < weeksAhead) counts[wi]++;
-      });
-    }
-    cols = counts.map((n, i) => ({ n, label: i === 0 ? 'Hoy' : 'S' + (i + 1), today: i === 0 }));
-    head.querySelector('span').textContent = 'Por semana · ' + (weeksAhead === 18 ? 'todo el cuatrimestre' : 'próximas ' + weeksAhead + ' semanas');
+  let label = data.unitLabel;
+  if (style === 'stacked') {
+    const avg = data.cols.length ? data.cols.reduce((s, c) => s + c.n, 0) / data.cols.length : 0;
+    if (avg > 0) label += ' · prom. ' + (Math.round(avg * 10) / 10);
   }
-  const max = Math.max.apply(null, cols.map((c) => c.n).concat([1]));
-  cols.forEach((c) => {
-    const h = c.n === 0 ? 3 : Math.round((c.n / max) * 62) + 10;
-    const col = el('<div class="flex-1 min-w-0 flex flex-col items-center gap-1.5 h-full justify-end"></div>');
-    col.innerHTML =
-      '<div class="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">' + (c.n || '') + '</div>' +
-      '<div class="w-full max-w-[28px] rounded-md bg-neutral-100 dark:bg-neutral-800 flex items-end overflow-hidden" style="height:72px;">' +
-        '<div class="w-full rounded-md ' + (c.n > 0 ? a.bar : '') + '" style="height:' + h + 'px"></div>' +
-      '</div>' +
-      '<div class="text-[10px] ' + (c.today ? a.text + ' font-semibold' : 'text-neutral-400 dark:text-neutral-500') + '">' + esc(c.label) + '</div>';
-    bars.appendChild(col);
-  });
+  head.querySelector('span').textContent = label;
+  card.appendChild(head);
+  const body = el('<div></div>');
+  card.appendChild(body);
+  if (style === 'heatmap') renderRhythmHeatmap(body, data);
+  else if (style === 'stacked') renderRhythmStacked(body, data);
+  else if (style === 'chips') renderRhythmChips(body, data);
+  else renderRhythmBars(body, data);
   return card;
 }
 
@@ -1571,6 +1803,11 @@ function renderAjustes(node) {
         <h3 class="font-medium mb-3">Color de acento</h3>
         <div id="accents" class="flex gap-3"></div>
       </div>
+      <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5">
+        <h3 class="font-medium mb-1">Estilo de "Ritmo de entregas"</h3>
+        <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Cómo se ve, en Resumen, el gráfico de tareas a lo largo del tiempo.</p>
+        <div id="rhythmStyles" class="flex gap-2 flex-wrap"></div>
+      </div>
       <div class="flex items-center gap-3">
         <button id="save" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Guardar cambios</button>
         <button id="resync" class="border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-4 py-2">Sincronizar ahora</button>
@@ -1769,6 +2006,19 @@ function renderAjustes(node) {
     accents.appendChild(sw);
   });
 
+  const rhythmStylesEl = card.querySelector('#rhythmStyles');
+  const currentRhythm = p.rhythm_chart || 'bars';
+  RHYTHM_STYLES.forEach((s) => {
+    const sel = currentRhythm === s.key;
+    const btn = el('<button type="button" data-s="'+s.key+'" class="pressable flex flex-col items-center gap-1.5 rounded-lg border px-3 py-2 '+(sel ? 'border-neutral-900 dark:border-neutral-100' : 'border-neutral-200 dark:border-neutral-700')+'"></button>');
+    const iconWrap = el('<div style="color:'+acHex()+'"></div>');
+    iconWrap.innerHTML = s.icon;
+    btn.appendChild(iconWrap);
+    btn.appendChild(el('<span class="text-[10px] text-neutral-500 dark:text-neutral-400">'+esc(s.label)+'</span>'));
+    btn.addEventListener('click', () => { state.profile.rhythm_chart = s.key; renderTab(); });
+    rhythmStylesEl.appendChild(btn);
+  });
+
   card.querySelector('#save').addEventListener('click', async () => {
     const msg = card.querySelector('#msg');
     msg.textContent = 'Guardando…';
@@ -1777,6 +2027,7 @@ function renderAjustes(node) {
         display_name: card.querySelector('#dn').value.trim(),
         ical_url: card.querySelector('#ical').value.trim(),
         accent: state.profile.accent,
+        rhythm_chart: state.profile.rhythm_chart,
       })});
       state.profile = r.profile;
       msg.textContent = 'Guardado.';
