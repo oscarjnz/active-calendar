@@ -213,6 +213,8 @@ export const COURSE_SIGNALS: Record<string, string[]> = {
   ],
   // Malware y Vulnerabilidades (electiva)
   TI3702: ['analisis de malware', 'malware'],
+  // Infraestructura Tecnológica
+  TI3420: ['roles y features', 'windows server'],
   // Ingeniería de Factores Humanos
   TI3410: [
     'factores humanos', 'ifh', 'practica colaborativa de ifh',
