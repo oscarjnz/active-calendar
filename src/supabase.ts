@@ -5,9 +5,10 @@ import { normalizeCode, pensumName } from './pensum';
 
 const VALID_ACCENTS = ['neutral', 'indigo', 'emerald', 'rose', 'amber', 'sky'] as const;
 const VALID_RHYTHM_CHARTS = ['bars', 'heatmap', 'stacked', 'chips'] as const;
-// Tope del rango "ver tareas de las próximas N semanas": ~4 meses, lo que dura un
-// cuatrimestre completo, para que el ajuste nunca se quede corto por cambios futuros.
-export const MAX_WEEKS_AHEAD = 18;
+// Tope del rango "ver tareas de las próximas N semanas": 15, lo que dura un
+// cuatrimestre completo según el calendario académico (ver time.ts), para que
+// el ajuste nunca se quede corto por cambios futuros.
+export const MAX_WEEKS_AHEAD = 15;
 
 /** Alias para el cliente de Supabase (lo usan otros módulos sin reimportar). */
 export type SbClient = SupabaseClient;

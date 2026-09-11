@@ -640,7 +640,7 @@ function weekIndexOf(iso, rangeStartIso) {
 // weeks_ahead, resincroniza (para clasificar/guardar las semanas nuevas ya
 // mismo) y avisa a quien lo montó vía onDone/onError para que decida cómo
 // refrescar su pantalla.
-const RANGE_PRESETS = [[1, 'Semana'], [4, 'Mes'], [18, 'Cuatrimestre']];
+const RANGE_PRESETS = [[1, 'Semana'], [4, 'Mes'], [15, 'Cuatrimestre']];
 function rangeControl(current, onDone, onError) {
   const a = ac();
   const wrap = el('<div class="relative inline-flex bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-1 gap-0.5"></div>');
@@ -1405,12 +1405,12 @@ function rhythmData() {
   const cols = counts.map((n, i) => ({ n, label: i === 0 ? 'Hoy' : 'S' + (i + 1), today: i === 0 }));
   return {
     weeksAhead, cols, breakdown: byWeek.map(finalizeBucket), matrix,
-    unitLabel: 'Por semana · ' + (weeksAhead === 18 ? 'todo el cuatrimestre' : 'próximas ' + weeksAhead + ' semanas'),
+    unitLabel: 'Por semana · ' + (weeksAhead === 15 ? 'todo el cuatrimestre' : 'próximas ' + weeksAhead + ' semanas'),
   };
 }
 
 // Variante A (default): las barras de siempre. Con más de 8 columnas (solo pasa
-// en la vista de cuatrimestre, 18 semanas) se agregan flechas de paginado en vez
+// en la vista de cuatrimestre, 15 semanas) se agregan flechas de paginado en vez
 // de encoger cada barra hasta que dejan de leerse.
 function renderRhythmBars(container, data) {
   const a = ac();
