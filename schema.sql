@@ -30,7 +30,7 @@ create table profiles (
   last_telegram timestamptz,                -- último mensaje de Telegram (anti-duplicados)
   completed_courses jsonb not null default '[]'::jsonb, -- códigos de materias ya aprobadas (acumulado entre cuatrimestres)
   term_block_id text,                       -- id de bloque ("YYYY-B") para el que term/courses ya está al día
-  weeks_ahead int not null default 1 check (weeks_ahead between 1 and 18), -- cuántas semanas (incl. la actual) mostrar/sincronizar; 18 ≈ un cuatrimestre completo (~4 meses)
+  weeks_ahead int not null default 1 check (weeks_ahead between 1 and 15), -- cuántas semanas (incl. la actual) mostrar/sincronizar; 15 = un cuatrimestre completo (ver time.ts)
   rhythm_chart text not null default 'bars' check (rhythm_chart in ('bars','heatmap','stacked','chips')), -- estilo del gráfico "Ritmo de entregas"
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -100,8 +100,14 @@ alter table profiles add column if not exists completed_courses jsonb not null d
 --   alter table profiles rename column term_wizard_resolved_for to term_block_id;
 alter table profiles add column if not exists term_block_id text;
 alter table profiles add column if not exists new_task_alerts boolean not null default true;
-alter table profiles add column if not exists weeks_ahead int not null default 1 check (weeks_ahead between 1 and 18);
+alter table profiles add column if not exists weeks_ahead int not null default 1 check (weeks_ahead between 1 and 15);
 alter table profiles add column if not exists rhythm_chart text not null default 'bars' check (rhythm_chart in ('bars','heatmap','stacked','chips'));
+-- Corrige el tope de weeks_ahead: un cuatrimestre son 15 semanas (ver time.ts), no 18.
+-- Si ya corriste una versión anterior de esta migración con el tope viejo (1-18),
+-- baja primero cualquier valor guardado por encima de 15 para que el check no falle.
+update profiles set weeks_ahead = 15 where weeks_ahead > 15;
+alter table profiles drop constraint if exists profiles_weeks_ahead_check;
+alter table profiles add constraint profiles_weeks_ahead_check check (weeks_ahead between 1 and 15);
 create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
 create index if not exists idx_profiles_tg_code on profiles(telegram_link_code) where telegram_link_code is not null;
 create index if not exists idx_profiles_notify on profiles(notify_dow) where email_notify or telegram_notify;
