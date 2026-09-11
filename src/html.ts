@@ -708,7 +708,7 @@ function renderLanding() {
   root.innerHTML = '';
   const wrap = el(\`
     <div class="fade-in min-h-screen grid md:grid-cols-2">
-      <div class="relative overflow-hidden hidden md:flex flex-col justify-center px-12 bg-neutral-900 text-white">
+      <div class="relative overflow-hidden hidden md:flex flex-col justify-center px-12 bg-neutral-900 dark:bg-neutral-950 text-white">
         <div class="glow-orb" aria-hidden="true"></div>
         <div class="relative flex items-center gap-3">\${logoMark('h-9 w-9')}<h1 class="text-4xl font-semibold tracking-tight">Active Calendar</h1></div>
         <p class="relative mt-4 text-neutral-300 max-w-sm">Todas tus tareas de Blackboard de la semana, organizadas por materia, en una sola vista. Sin instalar nada.</p>
@@ -1321,7 +1321,7 @@ function weekBadge() {
     ? 'Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel
     : 'En receso · ' + WEEK.blockLabel;
   const dot = WEEK.week ? a.bar : 'bg-neutral-400 dark:bg-neutral-600';
-  return el('<div class="fade-in flex items-center gap-2 text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-3">'+
+  return el('<div class="fade-in flex items-center gap-2 text-xs font-medium text-neutral-500 dark:text-neutral-400">'+
     '<span class="inline-block h-1.5 w-1.5 rounded-full '+dot+'"></span>'+esc(label)+'</div>');
 }
 
@@ -1375,11 +1375,13 @@ function renderRhythmCard() {
 function renderResumen(node) {
   const a = ac();
   const s = stats();
-  const rangeRow = el('<div class="flex justify-end mb-3"></div>');
-  rangeRow.appendChild(rangeControl(state.profile.weeks_ahead || 1, () => renderShell()));
-  node.appendChild(rangeRow);
+  // Semana + rango en una sola fila (antes eran 2 filas apiladas, una por control,
+  // dejando 2 líneas de "metadata" angostas antes de llegar al contenido real).
+  const metaRow = el('<div class="flex flex-wrap items-center justify-between gap-3 mb-4"></div>');
   const wb = weekBadge();
-  if (wb) node.appendChild(wb);
+  metaRow.appendChild(wb || el('<span></span>'));
+  metaRow.appendChild(rangeControl(state.profile.weeks_ahead || 1, () => renderShell()));
+  node.appendChild(metaRow);
   // Sin tareas esta semana -> modo vacaciones.
   if (s.total === 0) {
     node.appendChild(el(\`
@@ -1403,9 +1405,14 @@ function renderResumen(node) {
   // Desde lg (laptop/desktop) hay espacio de sobra: stats+progreso a la izquierda,
   // próximas pendientes a la derecha, en vez de una sola columna angosta con
   // márgenes enormes a los lados. En mobile/tablet sigue apilado, igual que siempre.
+  // Flex (no grid): con grid, ambas columnas comparten el mismo alto de fila y la
+  // más corta (esta) deja un hueco vacío debajo cuando la lista de tareas es más
+  // larga. Con flex cada columna crece según su propio contenido, así que el
+  // ritmo de entregas se acomoda pegado a la izquierda en vez de flotar como
+  // espacio muerto.
   const layout = el(\`
-    <div class="lg:grid lg:grid-cols-5 lg:gap-6 lg:items-start">
-      <div class="lg:col-span-2 space-y-3">
+    <div class="lg:flex lg:gap-6 lg:items-start">
+      <div class="lg:w-2/5 space-y-3">
         <div class="grid grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-3">
           <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.pending}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Pendientes</div></div>
           <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4"><div class="text-2xl font-semibold">\${s.done}</div><div class="text-xs text-neutral-500 dark:text-neutral-400">Hechas</div></div>
@@ -1416,7 +1423,7 @@ function renderResumen(node) {
           <div class="h-2 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden\${complete ? ' pulse-once' : ''}"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${s.pct}%"></div></div>
         </div>
       </div>
-      <div class="lg:col-span-3 mt-4 lg:mt-0">
+      <div class="lg:w-3/5 mt-4 lg:mt-0">
         <h3 class="text-sm font-medium mb-2">Próximas pendientes</h3>
         <div class="space-y-2 stagger"></div>
       </div>
@@ -1425,8 +1432,8 @@ function renderResumen(node) {
   const list = layout.querySelector('div.space-y-2');
   if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Sin pendientes próximas. Vas al día.</p>'));
   else upcoming.forEach(t => list.appendChild(taskRow(t)));
+  layout.firstElementChild.appendChild(renderRhythmCard());
   node.appendChild(layout);
-  node.appendChild(renderRhythmCard());
 }
 
 function renderMaterias(node) {
@@ -1481,13 +1488,13 @@ function renderAjustes(node) {
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <h3 class="font-medium">Perfil</h3>
         <label class="block text-sm">Nombre para mostrar</label>
-        <input id="dn" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.display_name||'')}" />
+        <input id="dn" class="w-full max-w-sm border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.display_name||'')}" />
         <p class="text-xs text-neutral-500 dark:text-neutral-400">Correo: \${esc(p.email||'—')}</p>
       </div>
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <h3 class="font-medium">Calendario de Blackboard</h3>
         <label class="block text-sm">URL iCal</label>
-        <input id="ical" class="w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
+        <input id="ical" class="w-full max-w-xl border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 font-mono text-xs \${a.ring} focus:outline-none focus:ring-2" value="\${esc(p.ical_url||'')}" placeholder="https://…/learn.ics" />
       </div>
       <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 space-y-3">
         <h3 class="font-medium">Rango de tareas</h3>
