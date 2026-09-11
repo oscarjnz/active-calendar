@@ -644,7 +644,13 @@ const RANGE_PRESETS = [[1, 'Semana'], [4, 'Mes'], [15, 'Cuatrimestre']];
 function rangeControl(current, onDone, onError) {
   const a = ac();
   const wrap = el('<div class="relative inline-flex bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-1 gap-0.5"></div>');
-  const thumb = el('<div class="absolute top-1 bottom-1 left-1 rounded-lg ' + a.bar + ' transition-all duration-300 [transition-timing-function:var(--ease-out)]" style="width:0"></div>');
+  // OJO: left-0 (no left-1) a propósito. offsetLeft de los botones ya viene
+  // medido desde el padding-box de wrap (mismo origen que el "left" absoluto
+  // de este thumb), así que translateX(offsetLeft) en paint() ya es el
+  // desplazamiento completo. Con left-1 aquí, se sumaba el padding dos veces
+  // (una por CSS y otra dentro del propio offsetLeft) y el fondo quedaba
+  // corrido a la derecha, saliéndose del borde en el último botón.
+  const thumb = el('<div class="absolute top-1 bottom-1 left-0 rounded-lg ' + a.bar + ' transition-all duration-300 [transition-timing-function:var(--ease-out)]" style="width:0"></div>');
   wrap.appendChild(thumb);
   const buttons = RANGE_PRESETS.map(([v, label]) => {
     const btn = el('<button type="button" class="relative z-10 px-3.5 py-1.5 text-sm font-medium rounded-lg transition-colors duration-200"></button>');
