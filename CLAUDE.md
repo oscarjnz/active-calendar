@@ -35,6 +35,13 @@ iCal de Blackboard.
   usuario.
 - `email.ts` / `telegram.ts` — envío de recordatorios semanales por cada canal.
 - `html.ts` — genera el HTML/CSS/JS del SPA (sin framework, se sirve inline desde el Worker).
+  **OJO:** casi todo el archivo vive dentro de un template literal, así que un backtick o un
+  `${` sueltos (incluso dentro de un comentario) rompen el archivo; `tsc` los reporta como
+  errores raros de sintaxis a decenas de líneas de distancia. Como `tsc` no revisa el JS del
+  navegador, para validarlo: `npx esbuild src/html.ts --bundle --format=esm --outfile=tmp.mjs`,
+  llamar a `renderApp({})`, extraer el `<script type="module">` y pasarle `node --check`.
+  Teclado: usar `submitOnEnter(ids, buttonId, root)` y `trapFocus(panel, initial)` en cada
+  formulario o panel nuevo (el usuario exige que todo se pueda usar sin mouse).
   Incluye el botón **Exportar** (100% cliente, sin endpoint en el Worker): renderiza la
   semana a un `<canvas>` fuera de pantalla con `html2canvas` (cargado por CDN vía
   `loadExportLibs`) y exporta a PDF (`jsPDF`), imagen `.jpg` o texto plano (`exportText`).
@@ -118,7 +125,13 @@ toca. No agregar aquí, en comentarios ni en commits ningún detalle de esa fuen
   `mergeCourses` (aditivo; el iCal sigue de respaldo si la fuente falla).
 - Siempre se usa la matrícula guardada en el perfil, jamás una que llegue del navegador.
 - Solo se lee horario (código y nombre de materia). No se leen ni guardan notas ni datos
-  personales.
+  personales. Del horario se descartan hoy los días, horas y profesor: si se agrega una vista
+  de horario, es lo primero que hay que empezar a guardar.
+- Las peticiones a la fuente **deben llevar `User-Agent`**: el `fetch` de un Worker sale sin
+  ninguno y el proveedor responde 403. Si vuelve a fallar, `call()` loguea el código HTTP y la
+  cabecera `cf-mitigated` (con `challenge` sería un WAF de verdad, sin eso es la aplicación).
+- Si la fuente está caída o bloquea, `/api/identity/start` responde 503 y la pantalla ofrece
+  continuar sin verificar: una fuente caída nunca debe dejar a un estudiante fuera de la app.
 
 ## Cómo correr / testear
 
