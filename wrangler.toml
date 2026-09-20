@@ -32,6 +32,7 @@ TELEGRAM_BOT_USERNAME = "ActiveCalendarBot"
 #   RESEND_API_KEY          re_...  envía los correos (recordatorio semanal)
 #   TELEGRAM_BOT_TOKEN      123:ABC... token del bot (de @BotFather)
 #   TELEGRAM_WEBHOOK_SECRET cadena aleatoria; valida que el webhook viene de Telegram
+#   ACADEMIC_SOURCE         JSON de la fuente académica (opcional, ver src/academic.ts)
 
 [observability]
 enabled = true

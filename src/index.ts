@@ -14,8 +14,14 @@ import {
   listWeekTasks,
   markEmailed,
   markTelegramed,
+  deleteIdentityCheck,
+  getIdentityCheck,
+  markAcademicSynced,
   mergeCourses,
+  saveIdentityCheck,
+  setIdentityAttempts,
   setProfileCourses,
+  setStudentId,
   setTaskCourse,
   setTaskStatus,
   setTelegramLinkCode,
@@ -23,8 +29,21 @@ import {
   upsertEvents,
 } from './supabase';
 import { getAuthUserId } from './clerk';
+import {
+  ACADEMIC_REFRESH_MS,
+  academicEnabled,
+  emailMatchesName,
+  fetchApprovedCodes,
+  fetchEnrolledCourses,
+  hashVerifyCode,
+  lookupOfficialName,
+  namesMatch,
+  newVerifyCode,
+  validInstitutionalEmail,
+  validStudentId,
+} from './academic';
 import { currentAcademicWeek, currentWeekRangeSdq, toSdqParts, weeksAheadRangeSdq } from './time';
-import { sendNewTasksEmail, sendWeeklyEmail } from './email';
+import { sendNewTasksEmail, sendVerificationEmail, sendWeeklyEmail } from './email';
 import { handleTelegramUpdate, newLinkCode, sendNewTasksTelegram, sendWeeklyTelegram } from './telegram';
 import { renderApp } from './html';
 
@@ -91,6 +110,26 @@ async function syncOne(
   // 1) Descubrir materias matriculadas desde las sesiones de clase (todo el feed)
   //    y fusionarlas con las que el estudiante ya tenga en su perfil.
   const discovered = collectEnrolledCourses(all);
+  // También desde la fuente académica oficial (más completa que las sesiones del feed:
+  // incluye materias que aún no tienen sesiones). Con throttle: no se consulta en cada
+  // tick del cron. Si falla o no está configurada, se sigue solo con el feed.
+  if (profile.student_id && academicEnabled(env)) {
+    const last = profile.academic_synced_at ? Date.parse(profile.academic_synced_at) : 0;
+    if (Date.now() - last >= ACADEMIC_REFRESH_MS) {
+      const official = await fetchEnrolledCourses(env, profile.student_id);
+      if (official.length > 0) {
+        discovered.push(...official);
+        await markAcademicSynced(sb, profile.user_id);
+      }
+      // Materias aprobadas: se suman (nunca se quitan) a las que el estudiante ya marcó.
+      const approved = await fetchApprovedCodes(env, profile.student_id);
+      const known = new Set(profile.completed_courses ?? []);
+      const fresh = approved.filter((c) => !known.has(c));
+      if (fresh.length > 0) {
+        await updateProfile(sb, profile.user_id, { completed_courses: [...known, ...fresh] });
+      }
+    }
+  }
   const courses = mergeCourses(profile.courses ?? [], discovered);
   if (discovered.length > 0) {
     await setProfileCourses(sb, profile.user_id, courses);
@@ -380,6 +419,95 @@ export default {
           rhythm_chart?: string;
         };
         const profile = await updateProfile(sb, u, body);
+        return json({ profile });
+      } catch (err) {
+        return json({ error: (err as Error).message }, { status: 400 });
+      }
+    }
+
+    // Verificación de matrícula, paso 1: valida nombre + matrícula + correo institucional
+    // contra la fuente oficial y envía un código al correo. Todo fallo de validación
+    // responde igual (genérico) para no revelar si una matrícula existe ni cuál dato falló.
+    if (path === '/api/identity/start' && req.method === 'POST') {
+      const u = await requireUser(req, env);
+      if (u instanceof Response) return u;
+      const FAIL = 'No pudimos verificar esos datos. Revisa tu nombre, tu matrícula y tu correo institucional.';
+      try {
+        const body = (await req.json()) as { name?: unknown; id?: unknown; email?: unknown };
+        const id = validStudentId(body.id);
+        const email = validInstitutionalEmail(body.email);
+        const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '';
+        if (!id || !email || !name) return json({ error: FAIL }, { status: 400 });
+        if (!academicEnabled(env) || !env.RESEND_API_KEY) {
+          return json({ error: 'La verificación no está disponible por ahora. Intenta más tarde.' }, { status: 503 });
+        }
+        const profile = await getProfile(sb, u);
+        if (!profile) return json({ error: FAIL }, { status: 400 });
+        if (profile.student_id) return json({ error: 'Tu matrícula ya está confirmada.' }, { status: 400 });
+
+        const official = await lookupOfficialName(env, id);
+        if (!official) return json({ error: FAIL }, { status: 400 });
+        if (!namesMatch(name, official) || !emailMatchesName(email, official)) {
+          return json({ error: FAIL }, { status: 400 });
+        }
+
+        // Límites: 1 envío por minuto y 5 por 24 h por cuenta.
+        const now = Date.now();
+        const prev = await getIdentityCheck(sb, u);
+        let sends = 1;
+        let windowStart = new Date(now).toISOString();
+        if (prev) {
+          if (now - Date.parse(prev.sent_at) < 60_000) {
+            return json({ error: 'Espera un minuto antes de pedir otro código.' }, { status: 429 });
+          }
+          if (now - Date.parse(prev.window_start) < 24 * 3600_000) {
+            if (prev.sends >= 5) {
+              return json({ error: 'Alcanzaste el límite de códigos por hoy. Intenta mañana.' }, { status: 429 });
+            }
+            sends = prev.sends + 1;
+            windowStart = prev.window_start;
+          }
+        }
+        const code = newVerifyCode();
+        await saveIdentityCheck(sb, {
+          user_id: u,
+          student_id: id,
+          email,
+          code_hash: await hashVerifyCode(env, u, code),
+          expires_at: new Date(now + 10 * 60_000).toISOString(),
+          attempts: 0,
+          sends,
+          window_start: windowStart,
+          sent_at: new Date(now).toISOString(),
+        });
+        await sendVerificationEmail(env, email, code);
+        return json({ ok: true });
+      } catch (err) {
+        console.error('identity start:', (err as Error).name);
+        return json({ error: 'No se pudo enviar el código. Intenta de nuevo.' }, { status: 502 });
+      }
+    }
+
+    // Paso 2: valida el código y recién entonces fija la matrícula (una sola vez).
+    if (path === '/api/identity/verify' && req.method === 'POST') {
+      const u = await requireUser(req, env);
+      if (u instanceof Response) return u;
+      try {
+        const body = (await req.json()) as { code?: unknown };
+        const code = typeof body.code === 'string' ? body.code.trim() : '';
+        const check = await getIdentityCheck(sb, u);
+        if (!check || Date.parse(check.expires_at) < Date.now()) {
+          return json({ error: 'El código venció. Pide uno nuevo.' }, { status: 400 });
+        }
+        if (check.attempts >= 5) {
+          return json({ error: 'Demasiados intentos. Pide un código nuevo.' }, { status: 429 });
+        }
+        if (!/^\d{6}$/.test(code) || (await hashVerifyCode(env, u, code)) !== check.code_hash) {
+          await setIdentityAttempts(sb, u, check.attempts + 1);
+          return json({ error: 'Código incorrecto.' }, { status: 400 });
+        }
+        const profile = await setStudentId(sb, u, check.student_id, check.email);
+        await deleteIdentityCheck(sb, u);
         return json({ profile });
       } catch (err) {
         return json({ error: (err as Error).message }, { status: 400 });

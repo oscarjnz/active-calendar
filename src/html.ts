@@ -331,13 +331,14 @@ function privacyHtml() {
   const p = (t) => '<p class="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">'+t+'</p>';
   const ul = (items) => '<ul class="list-disc ml-5 space-y-1 text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">'+items.map(i => '<li>'+i+'</li>').join('')+'</ul>';
   return [
-    '<p class="text-xs text-neutral-400 dark:text-neutral-500">Última actualización: 5 de junio de 2026</p>',
+    '<p class="text-xs text-neutral-400 dark:text-neutral-500">Última actualización: 20 de septiembre de 2026</p>',
     p('Active Calendar organiza, por materia, las tareas de tu calendario de Blackboard. Recopilamos lo mínimo necesario. Aquí te explicamos con claridad qué datos tocamos y qué hacemos con ellos.'),
     h('Qué información guardamos'),
     ul([
       '<b>Tu cuenta:</b> nombre, correo y foto de perfil, provistos por nuestro proveedor de inicio de sesión al registrarte.',
       '<b>Tu enlace de Blackboard (URL iCal):</b> el que tú pegas. Lo usamos solo para leer tus tareas; es privado y no se comparte.',
       '<b>Tus tareas de la semana</b> leídas de ese enlace: título, materia, fecha de entrega, enlace a Blackboard y si la marcaste como hecha.',
+      '<b>Tu matrícula y correo institucional:</b> los que verificas al registrarte con un código enviado a ese correo. La matrícula se guarda una sola vez y la usamos únicamente para reconocer tus materias del período y cuáles ya aprobaste (solo códigos y nombres de materias; nunca guardamos tus calificaciones).',
       '<b>Tus preferencias:</b> cuatrimestre, materias que cursas, color de acento y, si lo activas, la configuración del recordatorio por correo (día y hora).',
     ]),
     h('Qué NO hacemos'),
@@ -753,6 +754,134 @@ function renderLanding() {
   root.appendChild(wrap);
   clerk.mountSignIn(document.getElementById('signin'), { afterSignInUrl: cfg.APP_BASE_URL, afterSignUpUrl: cfg.APP_BASE_URL });
   wrap.querySelector('#privacyLink').addEventListener('click', openPrivacy);
+}
+
+
+
+// ---------- verificación de matrícula (se fija una sola vez) ----------
+// Pasos: datos (nombre, matrícula, correo institucional) -> pop-up de confirmación ->
+// código enviado al correo -> matrícula fijada. La misma tarjeta se usa en dos sitios:
+// pantalla completa para cuentas nuevas (renderStudentId) y como ventana sobre la app para
+// quienes ya estaban dentro (openIdentityModal), sin reiniciar nada.
+function identityCardHtml(a, prefillName) {
+  const inputCls = 'w-full border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 ' + a.ring + ' focus:outline-none focus:ring-2';
+  return \`
+    <div id="stepData" class="space-y-3">
+      <div><label class="block text-sm font-medium mb-1" for="sname">Nombre completo</label>
+        <input id="sname" autocomplete="name" value="\${esc(prefillName || '')}" class="\${inputCls}" placeholder="Nombre y apellido, como en tu inscripción" /></div>
+      <div><label class="block text-sm font-medium mb-1" for="sid">Matrícula</label>
+        <input id="sid" inputmode="numeric" autocomplete="off" maxlength="12" class="\${inputCls} font-mono" placeholder="00-0000" /></div>
+      <div><label class="block text-sm font-medium mb-1" for="smail">Correo institucional</label>
+        <input id="smail" type="email" autocomplete="email" class="\${inputCls}" placeholder="usuario@est.unibe.edu.do" /></div>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400">Debe ser tu correo institucional de estudiante (termina en @est.unibe.edu.do). Te enviaremos un código a ese correo. La matrícula se guarda una sola vez y no podrás cambiarla después.</p>
+      <button id="sNext" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Continuar</button>
+    </div>
+    <div id="stepCode" class="space-y-3 hidden">
+      <p class="text-sm">Enviamos un código de 6 dígitos a <b id="sSentTo"></b>. Vence en 10 minutos.</p>
+      <input id="scode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="\${inputCls} font-mono tracking-widest text-center text-lg" placeholder="000000" />
+      <div class="flex items-center gap-3">
+        <button id="sVerify" class="\${a.solid} text-white rounded-lg px-4 py-2 font-medium">Verificar</button>
+        <button id="sResend" class="text-sm underline decoration-dotted text-neutral-600 dark:text-neutral-300">Reenviar código</button>
+        <button id="sBack" class="text-sm underline decoration-dotted text-neutral-600 dark:text-neutral-300">Cambiar datos</button>
+      </div>
+    </div>
+    <p id="msg" class="mt-3 text-sm text-neutral-500 dark:text-neutral-400"></p>
+  \`;
+}
+
+// Conecta la tarjeta (ya insertada en el documento). onVerified(profile) corre al terminar.
+function wireIdentity(a, onVerified) {
+  const $ = (id) => document.getElementById(id);
+  const msg = $('msg');
+  const ID_RE = /^\\d{2}-\\d{3,6}$/;
+  const showStep = (code) => { $('stepData').classList.toggle('hidden', code); $('stepCode').classList.toggle('hidden', !code); msg.textContent = ''; };
+  const data = () => ({ name: $('sname').value.trim(), id: $('sid').value.trim(), email: $('smail').value.trim().toLowerCase() });
+
+  async function sendCode(btn, label) {
+    btn.disabled = true; const old = btn.textContent; btn.textContent = label;
+    try {
+      await api('/api/identity/start', { method: 'POST', body: JSON.stringify(data()) });
+      $('sSentTo').textContent = data().email;
+      showStep(true); $('scode').focus();
+    } catch (err) { msg.textContent = err.message; }
+    btn.disabled = false; btn.textContent = old;
+  }
+
+  $('sNext').addEventListener('click', (e) => {
+    const d = data();
+    if (!d.name || !d.id || !d.email) { msg.textContent = 'Completa los tres campos.'; return; }
+    if (!ID_RE.test(d.id)) { msg.textContent = 'Formato de matrícula inválido. Ejemplo: 00-0000.'; return; }
+    if (!/^[^@\\s]+@est\\.unibe\\.edu\\.do$/.test(d.email)) { msg.textContent = 'Usa tu correo institucional de estudiante (@est.unibe.edu.do).'; return; }
+    msg.textContent = '';
+    const btn = e.currentTarget;
+    // Confirmación previa: una vez verificada no hay vuelta atrás. Va en un modal aparte,
+    // así que el de verificación (si lo hay) queda debajo y se retoma al cerrar.
+    const box = el('<div class="fixed inset-0 z-[70] flex items-center justify-center p-4"></div>');
+    box.innerHTML = \`
+      <div class="absolute inset-0 bg-black/50"></div>
+      <div role="dialog" aria-modal="true" class="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl p-5 space-y-2">
+        <h3 class="font-semibold">Confirma tu matrícula</h3>
+        <p class="text-sm">¿Tu matrícula es <b class="font-mono">\${esc(d.id)}</b>?</p>
+        <p class="text-sm text-neutral-600 dark:text-neutral-300">Una vez confirmada <b>no podrás cambiarla</b>, así que revísala bien antes de continuar.</p>
+        <div class="flex gap-2 justify-end pt-3">
+          <button id="cfBack" class="pressable border border-neutral-300 dark:border-neutral-700 rounded-lg px-4 py-2 text-sm">Revisar</button>
+          <button id="cfOk" class="\${a.solid} text-white rounded-lg px-4 py-2 text-sm font-medium">Sí, es correcta</button>
+        </div>
+      </div>\`;
+    document.body.appendChild(box);
+    $('cfBack').addEventListener('click', () => box.remove());
+    $('cfOk').addEventListener('click', () => { box.remove(); sendCode(btn, 'Enviando…'); });
+  });
+
+  $('sResend').addEventListener('click', (e) => sendCode(e.currentTarget, 'Enviando…'));
+  $('sBack').addEventListener('click', () => showStep(false));
+  $('sVerify').addEventListener('click', async (e) => {
+    const code = $('scode').value.trim();
+    if (!/^\\d{6}$/.test(code)) { msg.textContent = 'El código tiene 6 dígitos.'; return; }
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Verificando…';
+    try {
+      const r = await api('/api/identity/verify', { method: 'POST', body: JSON.stringify({ code }) });
+      onVerified(r.profile);
+      return;
+    } catch (err) { msg.textContent = err.message; }
+    btn.disabled = false; btn.textContent = 'Verificar';
+  });
+  $('scode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sVerify').click(); });
+  $('sname').focus();
+}
+
+// Nombre que ya conocemos de su cuenta, para no pedirlo desde cero.
+function knownName() {
+  const p = state.profile;
+  return [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.display_name || '';
+}
+
+// Cuentas nuevas: pantalla completa antes del onboarding de Blackboard.
+function renderStudentId() {
+  root.innerHTML = '';
+  const a = ac();
+  const wrap = el(\`
+    <div class="fade-in max-w-xl mx-auto px-4 py-10">
+      <div id="topbar" class="flex justify-end mb-6"></div>
+      <h1 class="text-2xl font-semibold mb-1">Hola, \${esc(state.profile.display_name || '')}</h1>
+      <p class="text-neutral-600 dark:text-neutral-300 mb-6">Primero confirma quién eres. Así reconocemos automáticamente tus materias de este período.</p>
+      <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm">\${identityCardHtml(a, knownName())}</div>
+    </div>
+  \`);
+  root.appendChild(wrap);
+  mountUserButton(document.getElementById('topbar'));
+  wireIdentity(a, (profile) => { state.profile = profile; renderApp2(); });
+}
+
+// Cuentas que ya estaban dentro: se ofrece encima de la app (que sigue ahí), sin reiniciar nada.
+function openIdentityModal() {
+  const a = ac();
+  const close = openModal('Verifica tu matrícula', '<p class="text-sm text-neutral-600 dark:text-neutral-300 mb-3">Ahora reconocemos tus materias y las que ya aprobaste desde tu matrícula. Confírmala una sola vez para activarlo.</p>' + identityCardHtml(a, knownName()));
+  wireIdentity(a, (profile) => {
+    state.profile = profile;
+    close();
+    renderShell();
+  });
 }
 
 // ---------- render: onboarding (sin enlace) ----------
@@ -2119,11 +2248,16 @@ function renderShell() {
     catch (err) { alert('Error: ' + err.message); btn.textContent = old; btn.disabled = false; }
   });
   renderTab();
+  // Cuenta previa sin matrícula verificada: se ofrece encima de la app, una vez por sesión.
+  if (!state.profile.student_id && !state.idPrompted) { state.idPrompted = true; openIdentityModal(); }
 }
 
 // Decide entre onboarding y app según haya enlace.
 function renderApp2() {
-  if (!state.profile.ical_url) renderOnboarding();
+  // Cuentas nuevas: la matrícula va primero. Quien ya estaba dentro entra a su app
+  // como siempre y ve la verificación encima (ver renderShell).
+  if (!state.profile.student_id && !state.profile.ical_url) renderStudentId();
+  else if (!state.profile.ical_url) renderOnboarding();
   else renderShell();
 }
 

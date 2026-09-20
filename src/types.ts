@@ -14,6 +14,9 @@ export interface Env {
   TELEGRAM_BOT_TOKEN?: string; // secreto: autentica las llamadas a la Bot API
   TELEGRAM_WEBHOOK_SECRET?: string; // secreto: valida que el webhook viene de Telegram
   TELEGRAM_BOT_USERNAME?: string; // público: usuario del bot para el enlace t.me (sin @)
+  // Fuente académica externa: JSON con host, rutas y campos (ver academic.ts). SECRETO:
+  // el repo es público, nada de esto puede vivir en el código.
+  ACADEMIC_SOURCE?: string;
 }
 
 export interface IcalEvent {
@@ -57,6 +60,9 @@ export interface Profile {
   term_block_id: string | null; // id de bloque ("YYYY-B") para el que term/courses ya está al día
   weeks_ahead: number; // cuántas semanas (incl. la actual) mostrar/sincronizar (1-15)
   rhythm_chart: string; // estilo del gráfico "Ritmo de entregas": 'bars' | 'heatmap' | 'stacked' | 'chips'
+  student_id: string | null; // matrícula; se fija una sola vez en el onboarding y no se puede cambiar
+  student_email: string | null; // correo institucional verificado al fijar la matrícula
+  academic_synced_at: string | null; // ISO de la última consulta a la fuente académica (throttle)
   created_at: string;
   updated_at: string;
 }

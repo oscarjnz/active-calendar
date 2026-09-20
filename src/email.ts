@@ -116,6 +116,18 @@ export async function sendWeeklyEmail(
   await sendViaResend(env, profile.email, subject, html);
 }
 
+/** Correo con el código de verificación de matrícula (vence en 10 minutos). */
+export async function sendVerificationEmail(env: Env, to: string, code: string): Promise<void> {
+  const html =
+    '<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:420px;margin:0 auto;padding:24px;">' +
+    '<h2 style="font-size:18px;margin:0 0 12px;color:#0a0a0a;">Verifica tu matrícula</h2>' +
+    '<p style="font-size:14px;color:#404040;margin:0 0 16px;">Usa este código en Active Calendar para confirmar que eres tú:</p>' +
+    `<p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 16px;color:#0a0a0a;">${esc(code)}</p>` +
+    '<p style="font-size:12px;color:#737373;margin:0;">Vence en 10 minutos. Si no lo pediste tú, ignora este correo.</p>' +
+    '</div>';
+  await sendViaResend(env, to, 'Tu código de verificación de Active Calendar', html);
+}
+
 async function sendViaResend(env: Env, to: string, subject: string, html: string): Promise<void> {
   const res = await fetch(RESEND_ENDPOINT, {
     method: 'POST',

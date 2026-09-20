@@ -451,3 +451,73 @@ export async function setProfileCourses(
   const { error } = await sb.from('profiles').update({ courses }).eq('user_id', userId);
   if (error) throw new Error(`profiles.setCourses: ${error.message}`);
 }
+
+/**
+ * Fija la matrícula del perfil. Es de UNA sola vez: el `is null` hace el update atómico,
+ * así que un segundo intento (o una carrera entre dos pestañas) no la pisa. Nunca se
+ * expone por `updateProfile`, para que no se pueda cambiar desde /api/profile.
+ */
+export async function setStudentId(
+  sb: SupabaseClient,
+  userId: string,
+  studentId: string,
+  studentEmail: string,
+): Promise<Profile> {
+  const { data, error } = await sb
+    .from('profiles')
+    .update({ student_id: studentId, student_email: studentEmail })
+    .eq('user_id', userId)
+    .is('student_id', null)
+    .select('*')
+    .maybeSingle();
+  if (error) {
+    // 23505 = unique_violation: esa matrícula ya la tiene otra cuenta.
+    if (error.code === '23505') throw new Error('Esa matrícula ya está registrada en otra cuenta.');
+    throw new Error(`profiles.setStudentId: ${error.message}`);
+  }
+  if (!data) throw new Error('Tu matrícula ya está confirmada y no se puede cambiar.');
+  return data as Profile;
+}
+
+/** Verificación de matrícula en curso (código enviado al correo institucional). */
+export interface IdentityCheck {
+  user_id: string;
+  student_id: string;
+  email: string;
+  code_hash: string;
+  expires_at: string;
+  attempts: number;
+  sends: number;
+  window_start: string;
+  sent_at: string;
+}
+
+export async function getIdentityCheck(sb: SupabaseClient, userId: string): Promise<IdentityCheck | null> {
+  const { data, error } = await sb.from('identity_checks').select('*').eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(`identity_checks.select: ${error.message}`);
+  return (data as IdentityCheck | null) ?? null;
+}
+
+export async function saveIdentityCheck(sb: SupabaseClient, row: IdentityCheck): Promise<void> {
+  const { error } = await sb.from('identity_checks').upsert(row, { onConflict: 'user_id' });
+  if (error) throw new Error(`identity_checks.upsert: ${error.message}`);
+}
+
+export async function setIdentityAttempts(sb: SupabaseClient, userId: string, attempts: number): Promise<void> {
+  const { error } = await sb.from('identity_checks').update({ attempts }).eq('user_id', userId);
+  if (error) throw new Error(`identity_checks.attempts: ${error.message}`);
+}
+
+export async function deleteIdentityCheck(sb: SupabaseClient, userId: string): Promise<void> {
+  const { error } = await sb.from('identity_checks').delete().eq('user_id', userId);
+  if (error) throw new Error(`identity_checks.delete: ${error.message}`);
+}
+
+/** Marca la última consulta a la fuente académica (para el throttle de syncOne). */
+export async function markAcademicSynced(sb: SupabaseClient, userId: string): Promise<void> {
+  const { error } = await sb
+    .from('profiles')
+    .update({ academic_synced_at: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (error) throw new Error(`profiles.markAcademicSynced: ${error.message}`);
+}

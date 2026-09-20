@@ -32,6 +32,9 @@ create table profiles (
   term_block_id text,                       -- id de bloque ("YYYY-B") para el que term/courses ya está al día
   weeks_ahead int not null default 1 check (weeks_ahead between 1 and 15), -- cuántas semanas (incl. la actual) mostrar/sincronizar; 15 = un cuatrimestre completo (ver time.ts)
   rhythm_chart text not null default 'bars' check (rhythm_chart in ('bars','heatmap','stacked','chips')), -- estilo del gráfico "Ritmo de entregas"
+  student_id text,                          -- matrícula; se fija una vez en el onboarding (inmutable, ver setStudentId)
+  student_email text,                       -- correo institucional verificado al fijar la matrícula
+  academic_synced_at timestamptz,           -- última consulta a la fuente académica (throttle)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -52,6 +55,8 @@ create table tasks (
 );
 
 create index if not exists idx_tasks_user_due on tasks(user_id, due);
+-- Una matrícula solo puede pertenecer a una cuenta.
+create unique index if not exists uq_profiles_student_id on profiles(student_id) where student_id is not null;
 -- Búsquedas del bot de Telegram (webhook y vinculación). Parciales: solo filas
 -- con valor, para que el índice sea pequeño y rápido aun con miles de usuarios.
 create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
@@ -62,6 +67,21 @@ create index if not exists idx_profiles_notify on profiles(notify_dow) where ema
 -- RLS: solo el Worker (service_role) toca estas tablas. El navegador NUNCA habla
 -- directo con Supabase, así que bloqueamos todo acceso anónimo/autenticado.
 -- service_role siempre hace bypass de RLS, por eso no necesitamos políticas.
+-- Verificación de matrícula: código de 6 dígitos (solo su hash) enviado al correo institucional.
+create table if not exists identity_checks (
+  user_id text primary key references profiles(user_id) on delete cascade,
+  student_id text not null,
+  email text not null,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts int not null default 0,
+  sends int not null default 1,
+  window_start timestamptz not null default now(),
+  sent_at timestamptz not null default now()
+);
+alter table identity_checks enable row level security;
+create unique index if not exists uq_profiles_student_email on profiles(student_email) where student_email is not null;
+
 alter table profiles enable row level security;
 alter table tasks enable row level security;
 

@@ -95,6 +95,31 @@ traen ninguna palabra clave posible (ej. "Laboratorio05", "actividad 2") — esa
 el estudiante clasifique manualmente la primera tarea de esa materia para darle una "semilla"
 al nivel 4; el resto de esa materia se autoasigna solo en el siguiente sync.
 
+## Fuente académica y matrícula (`academic.ts`)
+
+Segunda fuente de materias matriculadas, además de las sesiones del iCal. **El repo es
+público: en el código no puede haber nada de la fuente** (host, rutas, parámetros ni campos).
+Todo vive en el secret `ACADEMIC_SOURCE` (JSON, forma documentada en `academic.ts`) y el
+módulo solo lo interpreta de forma genérica. Solo corre en el Worker; el navegador nunca la
+toca. No agregar aquí, en comentarios ni en commits ningún detalle de esa fuente.
+
+- La matrícula (`profiles.student_id`) se captura y **verifica** en el paso previo al
+  onboarding (`renderStudentId`): nombre + matrícula + correo institucional, pop-up de
+  confirmación, y código de 6 dígitos enviado por Resend a ese correo
+  (`/api/identity/start` y `/verify`, tabla `identity_checks`, solo se guarda el hash). El
+  servidor compara nombre y correo con el nombre oficial y nunca lo devuelve al navegador;
+  los fallos responden igual para no filtrar si una matrícula existe. Se fija **una sola
+  vez**: solo `setStudentId` la escribe (update atómico con `is null`), nunca
+  `updateProfile`. Única por cuenta (índice único parcial). Cuentas nuevas lo ven a
+  pantalla completa; quien ya estaba dentro entra a su app y lo ve como ventana encima
+  (`openIdentityModal`, una vez por sesión hasta verificar), sin reiniciar nada.
+- También alimenta `completed_courses` (solo códigos aprobados del pensum, aditivo).
+- `syncOne` consulta con throttle de 12 h (`academic_synced_at`) y fusiona con
+  `mergeCourses` (aditivo; el iCal sigue de respaldo si la fuente falla).
+- Siempre se usa la matrícula guardada en el perfil, jamás una que llegue del navegador.
+- Solo se lee horario (código y nombre de materia). No se leen ni guardan notas ni datos
+  personales.
+
 ## Cómo correr / testear
 
 ```bash
