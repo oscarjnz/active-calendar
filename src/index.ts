@@ -446,8 +446,15 @@ export default {
         if (profile.student_id) return json({ error: 'Tu matrícula ya está confirmada.' }, { status: 400 });
 
         const official = await lookupOfficialName(env, id);
-        if (!official) return json({ error: FAIL }, { status: 400 });
-        if (!namesMatch(name, official) || !emailMatchesName(email, official)) {
+        // Si la fuente está caída o nos bloquea, decirlo tal cual: mandar al estudiante a
+        // revisar datos que están bien lo deja dando vueltas sin salida.
+        if (!official.ok) {
+          if (official.down) {
+            return json({ error: 'La verificación no está disponible por ahora. Intenta más tarde.' }, { status: 503 });
+          }
+          return json({ error: FAIL }, { status: 400 });
+        }
+        if (!namesMatch(name, official.name) || !emailMatchesName(email, official.name)) {
           return json({ error: FAIL }, { status: 400 });
         }
 

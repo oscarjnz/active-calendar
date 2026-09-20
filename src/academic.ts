@@ -75,25 +75,44 @@ function pick(obj: unknown, path: string): unknown {
   return cur;
 }
 
-/** Consulta un endpoint configurado y devuelve el JSON, o null ante cualquier falla. */
-async function call(env: Env, cfg: SourceConfig, ep: Endpoint, studentId: string): Promise<unknown | null> {
+// Resultado crudo de la fuente. `status` 0 = ni siquiera hubo respuesta (red, timeout,
+// JSON inválido); lo usamos para distinguir "la fuente está caída" de "respondió que no".
+type CallResult = { ok: true; body: unknown } | { ok: false; status: number };
+
+/** Si ese fallo significa "la fuente no está disponible" (y no "ese dato no existe"). */
+function sourceDown(status: number): boolean {
+  return status === 0 || status === 403 || status === 429 || status >= 500;
+}
+
+/** Consulta un endpoint configurado. Nunca lanza: devuelve el fallo como dato. */
+async function call(env: Env, cfg: SourceConfig, ep: Endpoint, studentId: string): Promise<CallResult> {
   try {
     const period = cfg.period || currentPeriodId();
     const url = new URL(ep.path, cfg.base);
     for (const [k, v] of Object.entries(ep.query ?? {})) {
       url.searchParams.set(k, v.replace('{id}', studentId).replace('{period}', period));
     }
-    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetch(url, {
+      // Sin cabeceras, `fetch` del Worker sale sin User-Agent y varios WAF lo rechazan de
+      // entrada. Nos identificamos con honestidad (no imitamos un navegador) y pedimos JSON.
+      headers: {
+        accept: 'application/json, text/plain, */*',
+        'accept-language': 'es-DO,es;q=0.9',
+        'user-agent': 'ActiveCalendar/1.0 (+https://activecalendar.site)',
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
     if (!res.ok) {
-      // El código HTTP distingue un bloqueo del proveedor (403) de una ruta mal puesta (404).
-      console.error('academic fetch failed: status', res.status);
-      return null;
+      // El código distingue un bloqueo del proveedor (403) de una ruta mal puesta (404), y
+      // `cf-mitigated` confirma si quien corta es el WAF y no la aplicación.
+      console.error('academic fetch failed: status', res.status, res.headers.get('cf-mitigated') ?? '');
+      return { ok: false, status: res.status };
     }
-    return await res.json();
+    return { ok: true, body: await res.json() };
   } catch (err) {
     // Solo el tipo de error: el mensaje podría arrastrar la URL.
     console.error('academic fetch failed:', (err as Error).name);
-    return null;
+    return { ok: false, status: 0 };
   }
 }
 
@@ -122,7 +141,8 @@ export async function fetchEnrolledCourses(env: Env, studentId: string): Promise
   const cfg = loadConfig(env);
   const ep = cfg?.schedule;
   if (!cfg || !ep || !validStudentId(studentId)) return [];
-  const rows = pick(await call(env, cfg, ep, studentId), ep.rows);
+  const r = await call(env, cfg, ep, studentId);
+  const rows = r.ok ? pick(r.body, ep.rows) : null;
   if (!Array.isArray(rows)) return [];
   const byCode = new Map<string, Course>();
   for (const row of rows) {
@@ -144,7 +164,8 @@ export async function fetchApprovedCodes(env: Env, studentId: string): Promise<s
   const cfg = loadConfig(env);
   const ep = cfg?.history;
   if (!cfg || !ep || !validStudentId(studentId)) return [];
-  const rows = pick(await call(env, cfg, ep, studentId), ep.rows);
+  const r = await call(env, cfg, ep, studentId);
+  const rows = r.ok ? pick(r.body, ep.rows) : null;
   if (!Array.isArray(rows)) return [];
   const pass = new Set(ep.pass.map((g) => g.toUpperCase()));
   const out = new Set<string>();
@@ -174,13 +195,20 @@ function splitOfficialName(raw: string): { surnames: string[]; given: string[] }
   return { surnames: s.split(/\s+/).filter(Boolean), given: g.split(/\s+/).filter(Boolean) };
 }
 
+// `down` separa "no pudimos preguntar" (fuente caída o bloqueándonos) de "preguntamos y esa
+// matrícula no está". Solo con eso el endpoint puede responder honestamente sin convertirse
+// en un oráculo de qué matrículas existen: un 404 sigue cayendo en el mensaje genérico.
+export type NameLookup = { ok: true; name: string } | { ok: false; down: boolean };
+
 /** Nombre completo oficial del estudiante (solo para comparar en el servidor; no sale de aquí). */
-export async function lookupOfficialName(env: Env, studentId: string): Promise<string | null> {
+export async function lookupOfficialName(env: Env, studentId: string): Promise<NameLookup> {
   const cfg = loadConfig(env);
   const ep = cfg?.identity;
-  if (!cfg || !ep || !validStudentId(studentId)) return null;
-  const v = pick(await call(env, cfg, ep, studentId), ep.name);
-  return typeof v === 'string' && v.trim() ? v : null;
+  if (!cfg || !ep || !validStudentId(studentId)) return { ok: false, down: false };
+  const r = await call(env, cfg, ep, studentId);
+  if (!r.ok) return { ok: false, down: sourceDown(r.status) };
+  const v = pick(r.body, ep.name);
+  return typeof v === 'string' && v.trim() ? { ok: true, name: v } : { ok: false, down: false };
 }
 
 /**

@@ -720,7 +720,15 @@ async function api(path, opts = {}) {
     ...opts,
     headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + token, ...(opts.headers || {}) },
   });
-  if (!res.ok) throw new Error((await res.text().catch(()=>'')) || ('HTTP ' + res.status));
+  if (!res.ok) {
+    // El cuerpo es {"error":"..."}: sacar el texto, no mostrarle el JSON crudo al usuario.
+    const raw = await res.text().catch(()=>'');
+    let m = raw;
+    try { const j = JSON.parse(raw); if (j && j.error) m = j.error; } catch (e) {}
+    const err = new Error(m || ('HTTP ' + res.status));
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -789,8 +797,9 @@ function identityCardHtml(a, prefillName) {
   \`;
 }
 
-// Conecta la tarjeta (ya insertada en el documento). onVerified(profile) corre al terminar.
-function wireIdentity(a, onVerified) {
+// Conecta la tarjeta (ya insertada en el documento). onVerified(profile) corre al terminar;
+// onUnavailable() corre si la fuente oficial está caída (503), para no dejar trabado a nadie.
+function wireIdentity(a, onVerified, onUnavailable) {
   const $ = (id) => document.getElementById(id);
   const msg = $('msg');
   const ID_RE = /^\\d{2}-\\d{3,6}$/;
@@ -803,7 +812,10 @@ function wireIdentity(a, onVerified) {
       await api('/api/identity/start', { method: 'POST', body: JSON.stringify(data()) });
       $('sSentTo').textContent = data().email;
       showStep(true); $('scode').focus();
-    } catch (err) { msg.textContent = err.message; }
+    } catch (err) {
+      msg.textContent = err.message;
+      if (err.status === 503 && onUnavailable) onUnavailable();
+    }
     btn.disabled = false; btn.textContent = old;
   }
 
@@ -870,7 +882,14 @@ function renderStudentId() {
   \`);
   root.appendChild(wrap);
   mountUserButton(document.getElementById('topbar'));
-  wireIdentity(a, (profile) => { state.profile = profile; renderApp2(); });
+  wireIdentity(a, (profile) => { state.profile = profile; renderApp2(); }, () => {
+    // Fuente oficial caída: esta pantalla es lo primero que ve una cuenta nueva, así que sin
+    // salida se quedaría fuera de la app entera. La matrícula se puede confirmar después.
+    if (document.getElementById('sSkip')) return;
+    const p = el('<p class="mt-3 text-sm"><button id="sSkip" class="underline decoration-dotted text-neutral-600 dark:text-neutral-300">Continuar sin verificar por ahora</button></p>');
+    document.getElementById('msg').insertAdjacentElement('afterend', p);
+    document.getElementById('sSkip').addEventListener('click', renderOnboarding);
+  });
 }
 
 // Cuentas que ya estaban dentro: se ofrece encima de la app (que sigue ahí), sin reiniciar nada.
