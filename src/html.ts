@@ -1616,6 +1616,26 @@ function nextClass() {
   }
   return null;
 }
+// Texto corto de la próxima clase (o la que está en curso), para el Resumen y el Horario.
+function nextClassText(nx) {
+  if (!nx) return '';
+  if (nx.live) return 'Ahora mismo: ' + nx.slot.name + ' (hasta las ' + nx.slot.end + ')';
+  const when = nx.inDays === 0 ? 'Hoy a las ' + nx.slot.start
+    : nx.inDays === 1 ? 'Mañana a las ' + nx.slot.start
+    : DAY_NAMES[nx.slot.day] + ' a las ' + nx.slot.start;
+  return when + ': ' + nx.slot.name;
+}
+// Bloque de clase de la MISMA materia el día en que se entrega la tarea. Sirve para
+// avisar "eso se entrega un día que ya vas a estar en clase": sin esto el estudiante
+// tiene que cruzar a mano el horario con cada fecha de entrega.
+function classOnDueDay(t) {
+  if (!t.due || !t.course_code) return null;
+  const code = normCode(t.course_code);
+  const day = sdqDow(t.due);
+  const same = schedule().filter(function (s) { return s.day === day && normCode(s.code) === code; })
+                         .sort(function (x, y) { return hhmmToMin(x.start) - hhmmToMin(y.start); });
+  return same[0] || null;
+}
 
 // ---------- avance del pensum ----------
 // Cruza el pensum completo con lo aprobado (completed_courses) y lo que cursa ahora
@@ -1757,6 +1777,7 @@ function taskRow(t) {
         <div class="text-sm break-words \${done ? 'line-through text-neutral-400 dark:text-neutral-600' : 'font-medium'}">\${esc(t.summary)}</div>
         <div class="text-xs text-neutral-500 dark:text-neutral-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
           <span>\${esc(fmtDue(t.due))}</span>
+          <span class="clase-slot"></span>
           <span class="materia-slot min-w-0 max-w-full"></span>
           \${t.url ? '<a class="underline decoration-dotted hover:decoration-solid" target="_blank" rel="noopener" href="'+esc(t.url)+'">abrir en Blackboard</a>' : ''}
         </div>
@@ -1778,6 +1799,18 @@ function taskRow(t) {
       e.target.disabled = false;
     }
   });
+  // Aviso de "ese día tienes clase de esta materia" (solo si el horario ya llegó).
+  const clase = row.querySelector('.clase-slot');
+  if (clase) {
+    const slot = done ? null : classOnDueDay(t);
+    if (slot) {
+      clase.className = 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 ' + a.chipBg + ' ' + a.chipText;
+      clase.textContent = 'Clase ese día · ' + slot.start;
+      clase.title = 'Tienes ' + slot.name + ' ese día de ' + slot.start + ' a ' + slot.end;
+    } else {
+      clase.remove();
+    }
+  }
   // Materia: muestra la asignada (clic para cambiarla/quitarla) o un selector
   // para asignarla. El estudiante siempre puede corregir una materia equivocada.
   const slot = row.querySelector('.materia-slot');
@@ -2073,6 +2106,19 @@ function renderRhythmCard() {
   return card;
 }
 
+// Tarjeta de "próxima clase" para el Resumen. null si todavía no hay horario.
+function nextClassCard() {
+  const a = ac();
+  const nx = nextClass();
+  if (!nx) return null;
+  const card = el('<div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4">'+
+    '<div class="text-xs text-neutral-500 dark:text-neutral-400">'+(nx.live ? 'Clase en curso' : 'Próxima clase')+'</div>'+
+    '<div class="text-sm font-medium mt-1 break-words">'+esc(nextClassText(nx))+'</div>'+
+    '<div class="text-xs '+a.text+' mt-1 tabular-nums">'+esc(nx.slot.start)+' – '+esc(nx.slot.end)+'</div>'+
+    '</div>');
+  return card;
+}
+
 function renderResumen(node) {
   const a = ac();
   const s = stats();
@@ -2083,8 +2129,11 @@ function renderResumen(node) {
   metaRow.appendChild(wb || el('<span></span>'));
   metaRow.appendChild(rangeControl(state.profile.weeks_ahead || 1, () => renderShell()));
   node.appendChild(metaRow);
-  // Sin tareas esta semana -> modo vacaciones.
+  // Sin tareas esta semana -> modo vacaciones. Aun así, si hay clases, decir cuál sigue:
+  // "no tienes entregas" no significa que no tengas que ir a clase mañana.
   if (s.total === 0) {
+    const nxEmpty = nextClassCard();
+    if (nxEmpty) { nxEmpty.classList.add('mb-4'); node.appendChild(nxEmpty); }
     node.appendChild(el(\`
       <div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-14">
         <h2 class="text-xl font-semibold">\${periodClearTitle()}</h2>
@@ -2130,6 +2179,8 @@ function renderResumen(node) {
       </div>
     </div>
   \`);
+  const nxCard = nextClassCard();
+  if (nxCard) layout.firstElementChild.appendChild(nxCard);
   const list = layout.querySelector('div.space-y-2');
   if (upcoming.length === 0) list.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Sin pendientes próximas. Vas al día.</p>'));
   else upcoming.forEach(t => list.appendChild(taskRow(t)));
@@ -2530,10 +2581,7 @@ function renderHorario(node) {
   }
   const nx = nextClass();
   const today = sdqTodayDow();
-  const nxText = nx
-    ? (nx.live ? 'Ahora mismo: ' + nx.slot.name + ' (hasta las ' + nx.slot.end + ')'
-      : (nx.inDays === 0 ? 'Hoy a las ' + nx.slot.start : (nx.inDays === 1 ? 'Mañana a las ' + nx.slot.start : DAY_NAMES[nx.slot.day] + ' a las ' + nx.slot.start)) + ': ' + nx.slot.name)
-    : '';
+  const nxText = nextClassText(nx);
 
   const head = el('<div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 mb-4">'+
     '<div class="flex items-start justify-between gap-3 flex-wrap">'+

@@ -117,7 +117,10 @@ y el código de materia, así que `buildWeeklySchedule` (en `ical.ts`) deduplica
 repetidas del cuatrimestre y deja una "semana tipo" `[{code,name,day,start,end}]` en hora de
 Santo Domingo (`day`: 0=Lun..6=Dom). `syncOne` la guarda en `profiles.schedule` con
 `setSchedule` (aparte de `updateProfile`, para que no se pueda escribir desde
-`/api/profile`), y solo cuando cambió. Por venir del iCal **no hay profesor ni aula**; si
+`/api/profile`), y solo cuando cambió. El horario también alimenta el tab Resumen:
+`nextClassCard()` (tarjeta de próxima clase o clase en curso, también en modo vacaciones) y
+`classOnDueDay(t)`, que marca en cada tarea pendiente si ese día hay clase de esa misma
+materia. Por venir del iCal **no hay profesor ni aula**; si
 algún día se quieren, tendrían que salir del horario de la fuente académica, que hoy
 descarta esos campos.
 
