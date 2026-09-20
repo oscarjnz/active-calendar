@@ -35,6 +35,7 @@ iCal de Blackboard.
   usuario.
 - `email.ts` / `telegram.ts` — envío de recordatorios semanales por cada canal.
 - `html.ts` — genera el HTML/CSS/JS del SPA (sin framework, se sirve inline desde el Worker).
+  Tabs: Resumen, Horario, Materias, Todas, Pensum, Ajustes.
   **OJO:** casi todo el archivo vive dentro de un template literal, así que un backtick o un
   `${` sueltos (incluso dentro de un comentario) rompen el archivo; `tsc` los reporta como
   errores raros de sintaxis a decenas de líneas de distancia. Como `tsc` no revisa el JS del
@@ -42,9 +43,16 @@ iCal de Blackboard.
   llamar a `renderApp({})`, extraer el `<script type="module">` y pasarle `node --check`.
   Teclado: usar `submitOnEnter(ids, buttonId, root)` y `trapFocus(panel, initial)` en cada
   formulario o panel nuevo (el usuario exige que todo se pueda usar sin mouse).
-  Incluye el botón **Exportar** (100% cliente, sin endpoint en el Worker): renderiza la
-  semana a un `<canvas>` fuera de pantalla con `html2canvas` (cargado por CDN vía
-  `loadExportLibs`) y exporta a PDF (`jsPDF`), imagen `.jpg` o texto plano (`exportText`).
+  Incluye **Exportar** (100% cliente, sin endpoint en el Worker), con tres documentos en
+  `EXPORTS`: tareas, horario y pensum. Los tres comparten la misma maquinaria: cada
+  documento es una lista de bloques HTML, `expPaginate` los mide de verdad y los reparte en
+  hojas A4 completas sin partir ninguno, y `expRenderCanvases` rasteriza **una hoja por
+  canvas** con `html2canvas` (CDN, `loadExportLibs`) para armar el PDF con `jsPDF`, la
+  imagen `.jpg` o el texto plano. **No volver al esquema viejo** de rasterizar todo el
+  documento en una imagen larga y cortarla cada 297 mm: partía tarjetas por la mitad y
+  siempre añadía una página en blanco al final por el redondeo del alto.
+  Para agregar un documento nuevo basta con una entrada en `EXPORTS` con `blocks()` y
+  `text()`; cada bloque lleva su propio `margin-bottom` (la paginación lo mide).
 
 ## Cómo se asigna la materia a una tarea (`deriveCourseCode`, en `ical.ts`)
 
@@ -101,6 +109,17 @@ restantes eran de dos materias (Sistemas Operativos, Criptografía) cuyos títul
 traen ninguna palabra clave posible (ej. "Laboratorio05", "actividad 2") — esas necesitan que
 el estudiante clasifique manualmente la primera tarea de esa materia para darle una "semilla"
 al nivel 4; el resto de esa materia se autoasigna solo en el siguiente sync.
+
+## Horario semanal (tab Horario)
+
+Sale del **iCal**, no de la fuente académica: las sesiones de clase traen `DTSTART`/`DTEND`
+y el código de materia, así que `buildWeeklySchedule` (en `ical.ts`) deduplica las semanas
+repetidas del cuatrimestre y deja una "semana tipo" `[{code,name,day,start,end}]` en hora de
+Santo Domingo (`day`: 0=Lun..6=Dom). `syncOne` la guarda en `profiles.schedule` con
+`setSchedule` (aparte de `updateProfile`, para que no se pueda escribir desde
+`/api/profile`), y solo cuando cambió. Por venir del iCal **no hay profesor ni aula**; si
+algún día se quieren, tendrían que salir del horario de la fuente académica, que hoy
+descarta esos campos.
 
 ## Fuente académica y matrícula (`academic.ts`)
 
