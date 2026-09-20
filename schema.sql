@@ -35,6 +35,7 @@ create table profiles (
   student_id text,                          -- matrícula; se fija una vez en el onboarding (inmutable, ver setStudentId)
   student_email text,                       -- correo institucional verificado al fijar la matrícula
   academic_synced_at timestamptz,           -- última consulta a la fuente académica (throttle)
+  schedule jsonb not null default '[]'::jsonb, -- horario semanal [{code,name,day,start,end}] derivado de las sesiones del iCal
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -131,3 +132,6 @@ alter table profiles add constraint profiles_weeks_ahead_check check (weeks_ahea
 create index if not exists idx_profiles_tg_chat on profiles(telegram_chat_id) where telegram_chat_id is not null;
 create index if not exists idx_profiles_tg_code on profiles(telegram_link_code) where telegram_link_code is not null;
 create index if not exists idx_profiles_notify on profiles(notify_dow) where email_notify or telegram_notify;
+-- Horario semanal (una semana tipo) derivado de las sesiones de clase del iCal. Lo escribe
+-- solo el sync del Worker, nunca /api/profile.
+alter table profiles add column if not exists schedule jsonb not null default '[]'::jsonb;

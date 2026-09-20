@@ -2,7 +2,7 @@
 // Solo procesa VEVENT y los campos UID, SUMMARY, DTSTART, DTEND, URL,
 // LAST-MODIFIED, CATEGORIES, DESCRIPTION. Maneja line unfolding y escapes.
 
-import type { Course, IcalEvent } from './types';
+import type { ClassSlot, Course, IcalEvent } from './types';
 import { COURSE_SIGNALS, normalizeCode, pensumName } from './pensum';
 
 /** Minúsculas y sin tildes, para matching tolerante a acentos. */
@@ -119,6 +119,36 @@ function toTitleCase(s: string): string {
   return s
     .toLowerCase()
     .replace(/\b([a-zà-ÿ])([a-zà-ÿ']*)/gi, (_, a: string, b: string) => a.toUpperCase() + b);
+}
+
+/**
+ * Arma el horario semanal a partir de las sesiones de clase del feed. Cada semana del
+ * cuatrimestre repite los mismos bloques, así que se deduplican por materia + día + hora y
+ * queda una sola semana tipo. OJO: el iCal no trae profesor ni aula, solo materia y horario.
+ * Se toman las sesiones más recientes hacia adelante (`from`) para que un cambio de sección a
+ * mitad de cuatrimestre no arrastre los bloques viejos.
+ */
+export function buildWeeklySchedule(events: IcalEvent[], from: Date = new Date()): ClassSlot[] {
+  const hhmm = (d: Date): string => {
+    const sdq = new Date(d.getTime() - 4 * 3600 * 1000);
+    return String(sdq.getUTCHours()).padStart(2, '0') + ':' + String(sdq.getUTCMinutes()).padStart(2, '0');
+  };
+  const byKey = new Map<string, ClassSlot>();
+  for (const ev of events) {
+    if (!ev.isSession || !ev.courseCode || !ev.start || !ev.due) continue;
+    if (ev.start.getTime() < from.getTime()) continue;
+    const sdq = new Date(ev.start.getTime() - 4 * 3600 * 1000);
+    const wd = sdq.getUTCDay(); // 0=Dom..6=Sáb
+    const slot: ClassSlot = {
+      code: ev.courseCode,
+      name: ev.course ?? pensumName(ev.courseCode) ?? ev.courseCode,
+      day: wd === 0 ? 6 : wd - 1,
+      start: hhmm(ev.start),
+      end: hhmm(ev.due),
+    };
+    byKey.set(`${slot.code}|${slot.day}|${slot.start}|${slot.end}`, slot);
+  }
+  return [...byKey.values()].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
 }
 
 /** Descubre las materias matriculadas a partir de los eventos de tipo sesión/clase. */
@@ -252,6 +282,7 @@ export function parseIcal(raw: string): IcalEvent[] {
           course,
           courseCode,
           isSession,
+          start: cur.dtstart ?? null,
           due,
           url: cur.url ?? null,
           lastModified: cur.lastModified ?? null,

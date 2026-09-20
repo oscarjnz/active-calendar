@@ -25,9 +25,22 @@ export interface IcalEvent {
   course: string | null; // nombre legible del curso si se pudo derivar
   courseCode: string | null; // código normalizado (ej. "TI3631") si se pudo derivar
   isSession: boolean; // true = clase/sesión (trae curso), false = tarea/entrega
+  start: Date | null; // DTSTART: solo se usa en las sesiones, para armar el horario semanal
   due: Date | null;
   url: string | null;
   lastModified: Date | null;
+}
+
+/**
+ * Un bloque de clase del horario semanal. Sale de las sesiones del iCal (no de la fuente
+ * académica), así que no hay profesor ni aula: solo materia, día y hora.
+ */
+export interface ClassSlot {
+  code: string; // código normalizado de la materia
+  name: string; // nombre legible
+  day: number; // 0=Lun .. 6=Dom, en hora de Santo Domingo
+  start: string; // "HH:MM" SDQ
+  end: string; // "HH:MM" SDQ
 }
 
 /** Materia matriculada por el estudiante (código + nombre legible). */
@@ -63,6 +76,7 @@ export interface Profile {
   student_id: string | null; // matrícula; se fija una sola vez en el onboarding y no se puede cambiar
   student_email: string | null; // correo institucional verificado al fijar la matrícula
   academic_synced_at: string | null; // ISO de la última consulta a la fuente académica (throttle)
+  schedule: ClassSlot[]; // horario semanal derivado de las sesiones del iCal (ver buildWeeklySchedule)
   created_at: string;
   updated_at: string;
 }

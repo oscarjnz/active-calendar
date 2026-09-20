@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Course, Env, IcalEvent, Profile, TaskRow } from './types';
+import type { ClassSlot, Course, Env, IcalEvent, Profile, TaskRow } from './types';
 import { fetchClerkUser } from './clerk';
 import { normalizeCode, pensumName } from './pensum';
 
@@ -164,6 +164,19 @@ export async function updateProfile(
     .single();
   if (error) throw new Error(`profiles.update: ${error.message}`);
   return data as Profile;
+}
+
+/**
+ * Horario semanal derivado del iCal. Va aparte de `updateProfile` (que atiende a
+ * /api/profile) a propósito: lo escribe solo el sync, el navegador no puede inventárselo.
+ */
+export async function setSchedule(
+  sb: SupabaseClient,
+  userId: string,
+  slots: ClassSlot[],
+): Promise<void> {
+  const { error } = await sb.from('profiles').update({ schedule: slots }).eq('user_id', userId);
+  if (error) throw new Error(`profiles.schedule: ${error.message}`);
 }
 
 export async function listAllProfilesWithIcal(sb: SupabaseClient): Promise<Profile[]> {

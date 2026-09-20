@@ -417,7 +417,14 @@ function privacyHtml() {
 }
 function openPrivacy() { openModal('Políticas de privacidad', privacyHtml()); }
 
-// ---------- exportar tareas (PDF / imagen / texto) ----------
+// ---------- exportar (PDF / imagen / texto) ----------
+// Tres documentos: tareas de la semana, horario y avance del pensum. Los tres pasan por la
+// misma maquinaria: una lista de bloques -> páginas A4 completas -> un canvas por página.
+// OJO: antes se rasterizaba el documento entero como una sola imagen larga y el PDF la
+// cortaba cada 297 mm, así que partía tarjetas por la mitad y, por el redondeo del alto,
+// añadía una página en blanco al final. Ahora se mide bloque por bloque y cada página se
+// rasteriza aparte, así nada queda cortado ni sobra una hoja.
+
 // Logo en línea (tamaño/color explícitos) para que se vea igual al rasterizar.
 function docLogo(px, color) {
   return '<svg viewBox="0 0 32 32" width="'+px+'" height="'+px+'" fill="none" stroke="'+(color||'currentColor')+'" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+
@@ -432,90 +439,101 @@ function expDateStr() {
 function expStudentName() {
   return (state.profile && state.profile.display_name) ? state.profile.display_name : 'Estudiante';
 }
-function expFilename(ext) { return 'Tareas - ' + expStudentName() + '.' + ext; }
 
-// HTML del documento (tamaño carta/A4 vertical, estilos en línea, siempre claro).
-// Mismo espíritu que el correo, pero como hoja con cabecera, resumen y pie.
-function exportDocHtml() {
+const PAGE_W = 794;   // A4 a 96 dpi
+const PAGE_H = 1123;
+const PAGE_PAD = 56;
+const BODY_W = PAGE_W - PAGE_PAD * 2;
+const DOC_FONT = '-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif';
+
+// Una hoja completa: cabecera de marca, cuerpo y pie numerado. Alto FIJO, para que cada
+// página del PDF calce exacta con una A4 y el pie quede siempre a la misma altura.
+function expPageHtml(doc, inner, page, total) {
   const accent = acHex();
-  const name = expStudentName();
-  const groups = byCourse();
-  const s = stats();
-  const range = rangeText(state.range);
-  const weekLine = WEEK ? (WEEK.week ? ('Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel) : ('En receso · ' + WEEK.blockLabel)) : 'Resumen de tareas';
-
-  function statBox(n, label) {
-    return '<div style="flex:1;border:1px solid #e9e9e9;border-radius:12px;padding:14px 16px;">'+
-      '<div style="font-size:24px;font-weight:700;line-height:1;">'+n+'</div>'+
-      '<div style="font-size:11px;color:#737373;margin-top:5px;">'+label+'</div></div>';
-  }
-
-  let bodyHtml;
-  if (!groups.length) {
-    bodyHtml = '<div style="margin-top:40px;text-align:center;border:1px dashed #e0e0e0;border-radius:16px;padding:52px 24px;">'+
-      '<div style="font-size:16px;font-weight:600;">Semana despejada</div>'+
-      '<div style="margin-top:4px;font-size:13px;color:#737373;">No hay tareas registradas para esta semana.</div></div>';
-  } else {
-    const statsHtml = '<div style="display:flex;gap:12px;margin-top:22px;">'+
-      statBox(s.pending,'Pendientes') + statBox(s.done,'Hechas') + statBox(s.total,'Total') + '</div>';
-    const groupsHtml = groups.map(function (g) {
-      const done = g.tasks.filter(function (t) { return t.status === 'done'; }).length;
-      const rows = g.tasks.map(function (t) {
-        const isDone = t.status === 'done';
-        const ind = isDone
-          ? '<span style="display:inline-flex;width:16px;height:16px;border-radius:9999px;background:'+accent+';color:#fff;align-items:center;justify-content:center;font-size:10px;line-height:1;flex:0 0 auto;">✓</span>'
-          : '<span style="display:inline-block;width:14px;height:14px;border-radius:9999px;border:1.5px solid #cfcfcf;flex:0 0 auto;"></span>';
-        const titleStyle = isDone
-          ? 'font-size:13px;line-height:1.4;color:#a3a3a3;text-decoration:line-through;'
-          : 'font-size:13px;line-height:1.4;color:#171717;';
-        return '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
-          '<span style="margin-top:1px;">'+ind+'</span>'+
-          '<div style="flex:1 1 auto;min-width:0;"><div style="'+titleStyle+'">'+esc(t.summary)+'</div></div>'+
-          '<div style="font-size:11px;color:#737373;white-space:nowrap;margin-left:10px;">'+esc(fmtDue(t.due))+'</div></div>';
-      }).join('');
-      return '<div style="margin-top:22px;break-inside:avoid;">'+
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
-        '<span style="display:inline-block;width:8px;height:8px;border-radius:9999px;background:'+accent+';flex:0 0 auto;"></span>'+
-        '<span style="font-size:12px;font-weight:700;letter-spacing:0.03em;color:#404040;">'+esc(g.label)+'</span>'+
-        '<span style="margin-left:auto;font-size:11px;color:#a3a3a3;">'+done+'/'+g.tasks.length+'</span></div>'+
-        rows + '</div>';
-    }).join('');
-    bodyHtml = statsHtml + groupsHtml;
-  }
-
-  return '<div style="width:794px;box-sizing:border-box;background:#ffffff;color:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;min-height:1123px;padding:56px 56px 44px;display:flex;flex-direction:column;">'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0a0a0a;padding-bottom:18px;">'+
+  return '<div style="width:'+PAGE_W+'px;height:'+PAGE_H+'px;box-sizing:border-box;background:#ffffff;color:#0a0a0a;font-family:'+DOC_FONT+';padding:'+PAGE_PAD+'px '+PAGE_PAD+'px 44px;display:flex;flex-direction:column;overflow:hidden;">'+
+    '<div style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0a0a0a;padding-bottom:18px;">'+
       '<div style="display:flex;align-items:center;gap:10px;"><span style="display:inline-flex;color:'+accent+';">'+docLogo(28)+'</span>'+
       '<span style="font-size:18px;font-weight:700;letter-spacing:-0.01em;">Active Calendar</span></div>'+
-      '<div style="text-align:right;font-size:11px;color:#737373;line-height:1.6;"><div style="font-weight:600;color:#0a0a0a;">Reporte de tareas</div><div>'+esc(expDateStr())+'</div></div>'+
+      '<div style="text-align:right;font-size:11px;color:#737373;line-height:1.6;"><div style="font-weight:600;color:#0a0a0a;">'+esc(doc.docTitle)+'</div><div>'+esc(expDateStr())+'</div></div>'+
     '</div>'+
-    '<div style="margin-top:28px;">'+
-      '<div style="font-size:11px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:'+accent+';">'+esc(weekLine)+'</div>'+
-      '<h1 style="margin:7px 0 0;font-size:27px;font-weight:700;letter-spacing:-0.02em;">'+esc(name)+'</h1>'+
-      (range ? '<div style="margin-top:4px;font-size:13px;color:#737373;">Semana del '+esc(range)+'</div>' : '')+
-    '</div>'+
-    bodyHtml +
-    '<div style="flex:1 1 auto;"></div>'+
-    '<div style="margin-top:36px;padding-top:16px;border-top:1px solid #ececec;display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#a3a3a3;">'+
+    '<div class="expBody" style="flex:1 1 auto;min-height:0;padding-top:26px;">'+(inner||'')+'</div>'+
+    '<div style="flex:0 0 auto;margin-top:20px;padding-top:16px;border-top:1px solid #ececec;display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#a3a3a3;">'+
       '<span style="display:inline-flex;align-items:center;gap:6px;color:#737373;"><span style="display:inline-flex;color:'+accent+';">'+docLogo(13)+'</span>Powered by Active Calendar</span>'+
-      '<span>Developed by Oscar O. Jiménez · © 2026</span></div>'+
+      '<span>'+(total > 1 ? 'Página '+page+' de '+total+' · ' : '')+'Developed by Oscar O. Jiménez · © 2026</span></div>'+
   '</div>';
 }
 
-// Versión en texto plano: sin asteriscos, almohadillas ni marcas de formato.
-function exportText() {
-  const name = expStudentName();
+// Bloque de título (siempre el primero del documento).
+function expTitleBlock(eyebrow, subtitle) {
+  return '<div style="margin:0 0 20px;">'+
+    '<div style="font-size:11px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:'+acHex()+';">'+esc(eyebrow)+'</div>'+
+    '<h1 style="margin:7px 0 0;font-size:27px;font-weight:700;letter-spacing:-0.02em;">'+esc(expStudentName())+'</h1>'+
+    (subtitle ? '<div style="margin-top:4px;font-size:13px;color:#737373;">'+esc(subtitle)+'</div>' : '')+
+  '</div>';
+}
+function expStatRow(items) {
+  const boxes = items.map(function (it) {
+    return '<div style="flex:1;border:1px solid #e9e9e9;border-radius:12px;padding:14px 16px;">'+
+      '<div style="font-size:24px;font-weight:700;line-height:1;">'+esc(String(it[0]))+'</div>'+
+      '<div style="font-size:11px;color:#737373;margin-top:5px;">'+esc(it[1])+'</div></div>';
+  }).join('');
+  return '<div style="margin:0 0 14px;display:flex;gap:12px;">'+boxes+'</div>';
+}
+function expEmptyBlock(title, sub) {
+  return '<div style="margin:0 0 14px;text-align:center;border:1px dashed #e0e0e0;border-radius:16px;padding:52px 24px;">'+
+    '<div style="font-size:16px;font-weight:600;">'+esc(title)+'</div>'+
+    '<div style="margin-top:4px;font-size:13px;color:#737373;">'+esc(sub)+'</div></div>';
+}
+// Cabecera de sección con punto de acento y contador a la derecha.
+function expSectionHead(label, right) {
+  return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+    '<span style="display:inline-block;width:8px;height:8px;border-radius:9999px;background:'+acHex()+';flex:0 0 auto;"></span>'+
+    '<span style="font-size:12px;font-weight:700;letter-spacing:0.03em;color:#404040;">'+esc(label)+'</span>'+
+    (right ? '<span style="margin-left:auto;font-size:11px;color:#a3a3a3;">'+esc(right)+'</span>' : '')+
+  '</div>';
+}
+
+// ----- documento: tareas de la semana -----
+function expWeekLine() {
+  if (!WEEK) return 'Resumen de tareas';
+  return WEEK.week ? ('Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel) : ('En receso · ' + WEEK.blockLabel);
+}
+function expTareasBlocks() {
   const groups = byCourse();
   const s = stats();
   const range = rangeText(state.range);
-  const weekLine = WEEK ? (WEEK.week ? ('Semana ' + WEEK.week + ' de 15 · ' + WEEK.blockLabel) : ('En receso · ' + WEEK.blockLabel)) : '';
-  const L = [];
-  L.push('ACTIVE CALENDAR — Reporte de tareas');
-  L.push(expDateStr());
-  L.push('');
-  L.push('Estudiante: ' + name);
+  const blocks = [expTitleBlock(expWeekLine(), range ? 'Semana del ' + range : '')];
+  if (!groups.length) {
+    blocks.push(expEmptyBlock('Semana despejada', 'No hay tareas registradas para esta semana.'));
+    return blocks;
+  }
+  blocks.push(expStatRow([[s.pending,'Pendientes'],[s.done,'Hechas'],[s.total,'Total']]));
+  groups.forEach(function (g) {
+    const done = g.tasks.filter(function (t) { return t.status === 'done'; }).length;
+    const rows = g.tasks.map(function (t) {
+      const isDone = t.status === 'done';
+      const ind = isDone
+        ? '<span style="display:inline-flex;width:16px;height:16px;border-radius:9999px;background:'+acHex()+';color:#fff;align-items:center;justify-content:center;font-size:10px;line-height:1;flex:0 0 auto;">✓</span>'
+        : '<span style="display:inline-block;width:14px;height:14px;border-radius:9999px;border:1.5px solid #cfcfcf;flex:0 0 auto;"></span>';
+      const titleStyle = isDone
+        ? 'font-size:13px;line-height:1.4;color:#a3a3a3;text-decoration:line-through;'
+        : 'font-size:13px;line-height:1.4;color:#171717;';
+      return '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
+        '<span style="margin-top:1px;">'+ind+'</span>'+
+        '<div style="flex:1 1 auto;min-width:0;"><div style="'+titleStyle+'">'+esc(t.summary)+'</div></div>'+
+        '<div style="font-size:11px;color:#737373;white-space:nowrap;margin-left:10px;">'+esc(fmtDue(t.due))+'</div></div>';
+    }).join('');
+    blocks.push('<div style="margin:0 0 16px;">'+expSectionHead(g.label, done+'/'+g.tasks.length)+rows+'</div>');
+  });
+  return blocks;
+}
+function expTareasText() {
+  const groups = byCourse();
+  const s = stats();
+  const range = rangeText(state.range);
+  const L = ['ACTIVE CALENDAR — Reporte de tareas', expDateStr(), '', 'Estudiante: ' + expStudentName()];
   if (range) L.push('Semana del ' + range);
-  if (weekLine) L.push(weekLine);
+  L.push(expWeekLine());
   L.push('');
   if (!groups.length) {
     L.push('Semana despejada: no hay tareas registradas para esta semana.');
@@ -531,10 +549,89 @@ function exportText() {
       L.push('');
     });
   }
-  L.push('—');
-  L.push('Powered by Active Calendar · Developed by Oscar O. Jiménez');
   return L.join('\\n');
 }
+
+// ----- documento: horario -----
+function expHorarioBlocks() {
+  const slots = schedule();
+  const blocks = [expTitleBlock('Horario de clases', WEEK ? WEEK.blockLabel : '')];
+  if (!slots.length) {
+    blocks.push(expEmptyBlock('Todavía no vemos tus clases', 'Sincroniza tu calendario de Blackboard para armar el horario.'));
+    return blocks;
+  }
+  blocks.push(expStatRow([[slots.length,'Bloques'],[scheduleCourseCount(),'Materias'],[scheduleHours(),'Horas por semana']]));
+  scheduleByDay().forEach(function (d) {
+    if (!d.slots.length) return;
+    const rows = d.slots.map(function (sl) {
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
+        '<span style="font-size:12px;font-weight:700;color:#404040;white-space:nowrap;font-variant-numeric:tabular-nums;">'+esc(sl.start + ' – ' + sl.end)+'</span>'+
+        '<span style="flex:1 1 auto;min-width:0;font-size:13px;color:#171717;">'+esc(sl.name)+'</span>'+
+        '<span style="font-size:11px;color:#a3a3a3;white-space:nowrap;">'+esc(sl.code)+'</span></div>';
+    }).join('');
+    blocks.push('<div style="margin:0 0 16px;">'+expSectionHead(d.label, d.slots.length + (d.slots.length === 1 ? ' clase' : ' clases'))+rows+'</div>');
+  });
+  return blocks;
+}
+function expHorarioText() {
+  const L = ['ACTIVE CALENDAR — Horario de clases', expDateStr(), '', 'Estudiante: ' + expStudentName(), ''];
+  if (!schedule().length) {
+    L.push('Todavía no hay clases registradas.');
+  } else {
+    scheduleByDay().forEach(function (d) {
+      if (!d.slots.length) return;
+      L.push(d.label);
+      L.push('-'.repeat(d.label.length));
+      d.slots.forEach(function (sl) { L.push(sl.start + ' - ' + sl.end + '  ' + sl.name + ' (' + sl.code + ')'); });
+      L.push('');
+    });
+  }
+  return L.join('\\n');
+}
+
+// ----- documento: avance del pensum -----
+function expPensumBlocks() {
+  const p = pensumProgress();
+  const blocks = [expTitleBlock('Avance del pensum', p.approved + ' de ' + p.total + ' materias aprobadas (' + p.pct + '%)')];
+  blocks.push(expStatRow([[p.approved,'Aprobadas'],[p.current,'Cursando'],[p.pending,'Pendientes'],[p.pct + '%','Avance']]));
+  p.terms.forEach(function (t) {
+    const rows = t.courses.map(function (c) {
+      const border = c.state === 'now' ? '#404040' : '#cfcfcf';
+      const mark = c.state === 'done'
+        ? '<span style="display:inline-flex;width:16px;height:16px;border-radius:9999px;background:'+acHex()+';color:#fff;align-items:center;justify-content:center;font-size:10px;line-height:1;flex:0 0 auto;">✓</span>'
+        : '<span style="display:inline-block;width:14px;height:14px;border-radius:9999px;border:1.5px solid '+border+';flex:0 0 auto;"></span>';
+      const label = c.state === 'done' ? 'Aprobada' : c.state === 'now' ? 'Cursando' : 'Pendiente';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
+        mark +
+        '<span style="flex:1 1 auto;min-width:0;font-size:13px;color:'+(c.state === 'done' ? '#a3a3a3' : '#171717')+';">'+esc(c.name)+(c.elective ? ' (electiva)' : '')+'</span>'+
+        '<span style="font-size:11px;color:#a3a3a3;white-space:nowrap;">'+esc(label)+'</span></div>';
+    }).join('');
+    blocks.push('<div style="margin:0 0 16px;">'+expSectionHead('Cuatrimestre ' + t.sem, t.done + '/' + t.courses.length)+rows+'</div>');
+  });
+  return blocks;
+}
+function expPensumText() {
+  const p = pensumProgress();
+  const L = ['ACTIVE CALENDAR — Avance del pensum', expDateStr(), '', 'Estudiante: ' + expStudentName(), '',
+    p.approved + ' aprobadas · ' + p.current + ' cursando · ' + p.pending + ' pendientes (' + p.pct + '% del pensum)', ''];
+  p.terms.forEach(function (t) {
+    L.push('Cuatrimestre ' + t.sem + ' (' + t.done + '/' + t.courses.length + ')');
+    L.push('-'.repeat(22));
+    t.courses.forEach(function (c) {
+      const mark = c.state === 'done' ? '[x]' : c.state === 'now' ? '[~]' : '[ ]';
+      L.push(mark + ' ' + c.name + (c.elective ? ' (electiva)' : ''));
+    });
+    L.push('');
+  });
+  return L.join('\\n');
+}
+
+const EXPORTS = {
+  tareas:  { title: 'Exportar tareas',  docTitle: 'Reporte de tareas', file: 'Tareas',  blocks: expTareasBlocks,  text: expTareasText },
+  horario: { title: 'Exportar horario', docTitle: 'Horario de clases', file: 'Horario', blocks: expHorarioBlocks, text: expHorarioText },
+  pensum:  { title: 'Exportar avance',  docTitle: 'Avance del pensum', file: 'Pensum',  blocks: expPensumBlocks,  text: expPensumText },
+};
+function expFilename(doc, ext) { return doc.file + ' - ' + expStudentName() + '.' + ext; }
 
 // Carga perezosa de las librerías de render (solo al exportar PDF/imagen).
 let _expLibs = null;
@@ -560,22 +657,78 @@ function downloadBlob(blob, filename) {
   setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 1500);
 }
 
-// Renderiza el documento (fuera de pantalla, a tamaño real) a un <canvas>.
-async function expRenderCanvas(html2canvas) {
-  const doc = el(exportDocHtml());
-  doc.style.width = '794px';
+// Mide cada bloque al ancho real de la hoja y los reparte en páginas completas. Un bloque
+// nunca se parte: si no cabe en lo que queda, abre la página siguiente.
+function expPaginate(doc) {
+  const blocks = doc.blocks();
   const holder = el('<div style="position:fixed;left:-10000px;top:0;z-index:-1;"></div>');
-  holder.appendChild(doc);
   document.body.appendChild(holder);
   try {
-    return await html2canvas(doc, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const probe = el(expPageHtml(doc, '', 1, 1));
+    holder.appendChild(probe);
+    const bodyEl = probe.querySelector('.expBody');
+    const cs = getComputedStyle(bodyEl);
+    const avail = bodyEl.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+    probe.remove();
+
+    const ruler = el('<div style="width:'+BODY_W+'px;font-family:'+DOC_FONT+';"></div>');
+    holder.appendChild(ruler);
+    const pages = [];
+    let cur = [], used = 0;
+    blocks.forEach(function (b) {
+      ruler.innerHTML = b;
+      const n = ruler.firstElementChild;
+      const h = n ? n.offsetHeight + (parseFloat(getComputedStyle(n).marginBottom) || 0) : 0;
+      if (used + h > avail && cur.length) { pages.push(cur); cur = []; used = 0; }
+      cur.push(b);
+      used += h;
+    });
+    if (cur.length) pages.push(cur);
+    if (!pages.length) pages.push([]);
+    return pages.map(function (bs, i) { return expPageHtml(doc, bs.join(''), i + 1, pages.length); });
   } finally {
     holder.remove();
   }
 }
 
+// Rasteriza cada página por separado: una imagen por hoja, nada de cortar una tira larga.
+async function expRenderCanvases(html2canvas, doc) {
+  const pages = expPaginate(doc);
+  const holder = el('<div style="position:fixed;left:-10000px;top:0;z-index:-1;"></div>');
+  document.body.appendChild(holder);
+  const out = [];
+  try {
+    for (const html of pages) {
+      const node = el(html);
+      holder.appendChild(node);
+      out.push(await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false }));
+      node.remove();
+    }
+  } finally {
+    holder.remove();
+  }
+  return out;
+}
+
+// Varias páginas en una sola imagen: se apilan con una separación clara.
+function expStackCanvases(canvases) {
+  if (canvases.length === 1) return canvases[0];
+  const gap = 24;
+  const w = canvases[0].width;
+  const h = canvases.reduce(function (a, c) { return a + c.height; }, 0) + gap * (canvases.length - 1);
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#e5e5e5';
+  ctx.fillRect(0, 0, w, h);
+  let y = 0;
+  canvases.forEach(function (c) { ctx.drawImage(c, 0, y); y += c.height + gap; });
+  return out;
+}
+
 // Popup con las 3 vistas: PDF, imagen .jpg y texto plano. Vista previa en vivo.
-function openExportModal() {
+function openExportModal(kind) {
+  const doc = EXPORTS[kind] || EXPORTS.tareas;
   let mode = 'pdf';
   const segBody = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;" id="expSeg" class="p-1 rounded-xl bg-neutral-100 dark:bg-neutral-800">'+
     [['pdf','PDF'],['image','Imagen'],['text','Texto']].map(function (m) {
@@ -587,25 +740,26 @@ function openExportModal() {
     '<p id="expNote" class="mt-3 text-xs text-neutral-500 dark:text-neutral-400"></p>'+
     '<button id="expDownload" class="'+ac().solid+' text-white rounded-lg px-4 py-2.5 font-medium w-full mt-2 inline-flex items-center justify-center gap-2">Descargar</button>'+
   '</div>';
-  openModal('Exportar tareas', body);
+  openModal(doc.title, body);
 
   const segBtns = Array.prototype.slice.call(document.querySelectorAll('#expSeg .expseg'));
   const dlBtn = document.getElementById('expDownload');
   const note = document.getElementById('expNote');
-  const NOTES = {
-    pdf: 'Documento PDF tamaño carta, listo para imprimir o compartir.',
-    image: 'Imagen .jpg de una sola página, ideal para enviar por chat.',
-    text: 'Texto plano, sin formato, para pegar donde quieras.',
-  };
   const LABELS = { pdf: 'Descargar PDF', image: 'Descargar imagen', text: 'Descargar .txt' };
 
+  function noteFor(pages) {
+    if (mode === 'text') return 'Texto plano, sin formato, para pegar donde quieras.';
+    const n = pages + (pages === 1 ? ' página' : ' páginas');
+    return mode === 'pdf'
+      ? 'Documento PDF tamaño A4, ' + n + ', listo para imprimir o compartir.'
+      : 'Imagen .jpg de ' + n + ', ideal para enviar por chat.';
+  }
   function paintSeg() {
     segBtns.forEach(function (b) {
       const on = b.dataset.m === mode;
       b.className = 'expseg pressable text-sm rounded-lg py-1.5 font-medium ' +
         (on ? 'bg-white dark:bg-neutral-900 shadow-sm text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400');
     });
-    note.textContent = NOTES[mode];
     dlBtn.textContent = LABELS[mode];
   }
   function renderPreview() {
@@ -615,23 +769,30 @@ function openExportModal() {
     if (mode === 'text') {
       area.style.background = '#ffffff';
       const pre = el('<pre style="margin:0;padding:16px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:#171717;background:#ffffff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"></pre>');
-      pre.textContent = exportText();
+      pre.textContent = doc.text();
       area.appendChild(pre);
+      note.textContent = noteFor(1);
       return;
     }
     area.style.background = '';
-    const wrapper = el('<div style="padding:16px;display:flex;justify-content:center;"></div>');
-    const doc = el(exportDocHtml());
+    const pages = expPaginate(doc);
+    note.textContent = noteFor(pages.length);
+    const wrapper = el('<div style="padding:16px;display:flex;flex-direction:column;align-items:center;gap:14px;"></div>');
     const w = Math.max(240, area.clientWidth - 32);
-    const scale = w / 794;
-    doc.style.transformOrigin = 'top left';
-    doc.style.transform = 'scale(' + scale + ')';
-    const scaler = el('<div style="box-shadow:0 6px 28px rgba(0,0,0,0.14);border-radius:4px;overflow:hidden;background:#fff;"></div>');
-    scaler.style.width = w + 'px';
-    scaler.appendChild(doc);
-    wrapper.appendChild(scaler);
+    const scale = w / PAGE_W;
+    pages.forEach(function (html) {
+      const page = el(html);
+      page.style.transformOrigin = 'top left';
+      page.style.transform = 'scale(' + scale + ')';
+      // El transform no ocupa espacio, así que el contenedor lleva el alto ya escalado;
+      // sin esto las hojas se montarían una encima de otra.
+      const scaler = el('<div style="box-shadow:0 6px 28px rgba(0,0,0,0.14);border-radius:4px;overflow:hidden;background:#fff;flex:0 0 auto;"></div>');
+      scaler.style.width = w + 'px';
+      scaler.style.height = (PAGE_H * scale) + 'px';
+      scaler.appendChild(page);
+      wrapper.appendChild(scaler);
+    });
     area.appendChild(wrapper);
-    requestAnimationFrame(function () { scaler.style.height = (doc.offsetHeight * scale) + 'px'; });
   }
 
   segBtns.forEach(function (b) {
@@ -639,25 +800,24 @@ function openExportModal() {
   });
   dlBtn.addEventListener('click', async function () {
     if (mode === 'text') {
-      downloadBlob(new Blob([exportText()], { type: 'text/plain;charset=utf-8' }), expFilename('txt'));
+      downloadBlob(new Blob([doc.text()], { type: 'text/plain;charset=utf-8' }), expFilename(doc, 'txt'));
       return;
     }
     const old = dlBtn.textContent; dlBtn.disabled = true; dlBtn.textContent = 'Generando…';
     try {
       const libs = await loadExportLibs();
-      const canvas = await expRenderCanvas(libs.html2canvas);
+      const canvases = await expRenderCanvases(libs.html2canvas, doc);
       if (mode === 'image') {
-        await new Promise(function (res) { canvas.toBlob(function (b) { if (b) downloadBlob(b, expFilename('jpg')); res(); }, 'image/jpeg', 0.95); });
+        const canvas = expStackCanvases(canvases);
+        await new Promise(function (res) { canvas.toBlob(function (b) { if (b) downloadBlob(b, expFilename(doc, 'jpg')); res(); }, 'image/jpeg', 0.95); });
       } else {
+        // Una hoja A4 por canvas: cada página entra completa, sin recortes ni sobrantes.
         const pdf = new libs.jsPDF('p', 'mm', 'a4');
-        const pw = 210, ph = 297;
-        const imgW = pw, imgH = canvas.height * imgW / canvas.width;
-        const img = canvas.toDataURL('image/jpeg', 0.95);
-        let pos = 0, left = imgH;
-        pdf.addImage(img, 'JPEG', 0, pos, imgW, imgH, '', 'FAST');
-        left -= ph;
-        while (left > 0) { pos -= ph; pdf.addPage(); pdf.addImage(img, 'JPEG', 0, pos, imgW, imgH, '', 'FAST'); left -= ph; }
-        pdf.save(expFilename('pdf'));
+        canvases.forEach(function (c, i) {
+          if (i > 0) pdf.addPage();
+          pdf.addImage(c.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297, '', 'FAST');
+        });
+        pdf.save(expFilename(doc, 'pdf'));
       }
     } catch (err) {
       note.textContent = 'No se pudo generar: ' + (err && err.message ? err.message : err);
@@ -1409,6 +1569,82 @@ function periodClearBody() {
 function periodDoneBody() {
   return isMultiWeek() ? 'Sin tareas en el periodo. Estás al día.' : 'Sin tareas esta semana. Estás al día.';
 }
+// ---------- horario ----------
+const DAY_NAMES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+function schedule() { return (state.profile && state.profile.schedule) || []; }
+function hhmmToMin(t) { const p = String(t || '').split(':'); return (parseInt(p[0],10) || 0) * 60 + (parseInt(p[1],10) || 0); }
+// Lunes a viernes siempre (aunque estén vacíos, para que la rejilla no baile);
+// sábado y domingo solo si de verdad hay clase ese día.
+function scheduleDays() {
+  const slots = schedule();
+  const days = [0,1,2,3,4];
+  [5,6].forEach(function (d) { if (slots.some(function (s) { return s.day === d; })) days.push(d); });
+  return days;
+}
+function scheduleByDay() {
+  const slots = schedule();
+  return scheduleDays().map(function (d) {
+    return {
+      day: d,
+      label: DAY_NAMES[d],
+      slots: slots.filter(function (s) { return s.day === d; })
+                  .sort(function (x, y) { return hhmmToMin(x.start) - hhmmToMin(y.start); }),
+    };
+  });
+}
+function scheduleCourseCount() { return new Set(schedule().map(function (s) { return s.code; })).size; }
+function scheduleHours() {
+  const m = schedule().reduce(function (a, s) { return a + Math.max(0, hhmmToMin(s.end) - hhmmToMin(s.start)); }, 0);
+  return Math.round(m / 60);
+}
+function sdqNow() { return new Date(new Date().getTime() - 4 * 3600 * 1000); }
+function sdqTodayDow() { const wd = sdqNow().getUTCDay(); return wd === 0 ? 6 : wd - 1; }
+function sdqNowMin() { const d = sdqNow(); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
+// Clase en curso, o la siguiente mirando hacia adelante en la semana.
+function nextClass() {
+  const slots = schedule();
+  if (!slots.length) return null;
+  const today = sdqTodayDow(), now = sdqNowMin();
+  for (let i = 0; i < 7; i++) {
+    const d = (today + i) % 7;
+    const day = slots.filter(function (s) { return s.day === d; })
+                     .sort(function (x, y) { return hhmmToMin(x.start) - hhmmToMin(y.start); });
+    for (const s of day) {
+      if (i === 0 && hhmmToMin(s.end) <= now) continue;
+      return { slot: s, live: i === 0 && hhmmToMin(s.start) <= now, inDays: i };
+    }
+  }
+  return null;
+}
+
+// ---------- avance del pensum ----------
+// Cruza el pensum completo con lo aprobado (completed_courses) y lo que cursa ahora
+// (courses). Las materias que el estudiante lleva y no están en el pensum no cuentan.
+function pensumProgress() {
+  const p = state.profile || {};
+  const done = new Set((p.completed_courses || []).map(normCode));
+  const now = new Set((p.courses || []).map(function (c) { return normCode(c.code); }));
+  const terms = new Map();
+  let approved = 0, current = 0;
+  PENSUM.forEach(function (c) {
+    const code = normCode(c.code);
+    let st = 'todo';
+    if (done.has(code)) { st = 'done'; approved++; }
+    else if (now.has(code)) { st = 'now'; current++; }
+    if (!terms.has(c.sem)) terms.set(c.sem, []);
+    terms.get(c.sem).push({ code: code, name: c.name, elective: c.elective, state: st });
+  });
+  const list = [...terms.keys()].sort(function (x, y) { return x - y; }).map(function (sem) {
+    const courses = terms.get(sem);
+    return { sem: sem, courses: courses, done: courses.filter(function (c) { return c.state === 'done'; }).length };
+  });
+  const total = PENSUM.length;
+  return {
+    total: total, approved: approved, current: current, pending: total - approved - current,
+    pct: total ? Math.round(approved / total * 100) : 0, terms: list,
+  };
+}
+
 function stats() {
   const total = state.tasks.length;
   const done = state.tasks.filter(t => t.status === 'done').length;
@@ -2281,8 +2517,109 @@ function renderAjustes(node) {
   });
 }
 
+// ---------- render: horario ----------
+function renderHorario(node) {
+  const a = ac();
+  const slots = schedule();
+  if (!slots.length) {
+    node.appendChild(el('<div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-8 text-center">'+
+      '<div class="font-medium">Todavía no vemos tus clases</div>'+
+      '<p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">El horario se arma solo con las sesiones de clase de tu calendario de Blackboard. Sincroniza desde Ajustes y vuelve.</p>'+
+      '</div>'));
+    return;
+  }
+  const nx = nextClass();
+  const today = sdqTodayDow();
+  const nxText = nx
+    ? (nx.live ? 'Ahora mismo: ' + nx.slot.name + ' (hasta las ' + nx.slot.end + ')'
+      : (nx.inDays === 0 ? 'Hoy a las ' + nx.slot.start : (nx.inDays === 1 ? 'Mañana a las ' + nx.slot.start : DAY_NAMES[nx.slot.day] + ' a las ' + nx.slot.start)) + ': ' + nx.slot.name)
+    : '';
+
+  const head = el('<div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 mb-4">'+
+    '<div class="flex items-start justify-between gap-3 flex-wrap">'+
+      '<div><h2 class="font-medium">Tu semana de clases</h2>'+
+      '<p class="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">'+
+        scheduleCourseCount()+' materias · '+slots.length+' bloques · '+scheduleHours()+' horas por semana</p>'+
+      (nxText ? '<p class="text-sm mt-2 '+a.text+' font-medium">'+esc(nxText)+'</p>' : '')+
+      '</div>'+
+      '<button id="hExport" class="pressable border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 text-sm rounded-lg px-3 py-1.5">Exportar</button>'+
+    '</div></div>');
+  node.appendChild(head);
+  head.querySelector('#hExport').addEventListener('click', function () { openExportModal('horario'); });
+
+  // Columnas por día: en el teléfono queda una debajo de otra, en pantalla ancha se
+  // reparten solas (auto-fit), sin romperse con 5, 6 o 7 días.
+  const grid = el('<div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));"></div>');
+  scheduleByDay().forEach(function (d) {
+    const isToday = d.day === today;
+    const col = el('<div class="rounded-xl border '+(isToday ? 'border-neutral-400 dark:border-neutral-500' : 'border-neutral-200 dark:border-neutral-800')+' bg-white dark:bg-neutral-900 p-3 flex flex-col gap-2"></div>');
+    col.appendChild(el('<div class="flex items-baseline justify-between gap-2">'+
+      '<span class="text-sm font-medium '+(isToday ? a.text : '')+'">'+esc(d.label)+(isToday ? ' · hoy' : '')+'</span>'+
+      '<span class="text-xs text-neutral-400 dark:text-neutral-500">'+d.slots.length+'</span></div>'));
+    if (!d.slots.length) {
+      col.appendChild(el('<div class="text-xs text-neutral-400 dark:text-neutral-500 py-2">Sin clases</div>'));
+    }
+    d.slots.forEach(function (s) {
+      const live = isToday && hhmmToMin(s.start) <= sdqNowMin() && sdqNowMin() < hhmmToMin(s.end);
+      // chipBg/chipText y no soft/text: soft no tiene variante oscura en los acentos de
+      // color y en modo oscuro quedaría una mancha casi blanca.
+      const card = el('<div class="rounded-lg border px-2.5 py-2 '+(live ? a.chipBg + ' border-transparent' : 'border-neutral-200 dark:border-neutral-800')+'">'+
+        '<div class="text-xs font-semibold tabular-nums '+(live ? a.chipText : 'text-neutral-500 dark:text-neutral-400')+'">'+esc(s.start)+' – '+esc(s.end)+'</div>'+
+        '<div class="text-sm mt-0.5 break-words">'+esc(s.name)+'</div>'+
+        '<div class="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">'+esc(s.code)+'</div></div>');
+      col.appendChild(card);
+    });
+    grid.appendChild(col);
+  });
+  node.appendChild(grid);
+  node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Sale de las sesiones de tu calendario de Blackboard, así que no incluye profesor ni aula. Si cambias de sección, se actualiza en la próxima sincronización.</p>'));
+}
+
+// ---------- render: avance del pensum ----------
+function renderPensum(node) {
+  const a = ac();
+  const p = pensumProgress();
+  const curTerm = state.profile && state.profile.term;
+
+  const head = el('<div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 mb-4">'+
+    '<div class="flex items-start justify-between gap-3 flex-wrap">'+
+      '<div><h2 class="font-medium">Avance del pensum</h2>'+
+      '<p class="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">'+p.approved+' de '+p.total+' materias aprobadas</p></div>'+
+      '<button id="pExport" class="pressable border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 text-sm rounded-lg px-3 py-1.5">Exportar</button>'+
+    '</div>'+
+    '<div class="mt-4 h-2.5 rounded-full bg-neutral-100 dark:bg-neutral-800 overflow-hidden">'+
+      '<div class="h-full rounded-full '+a.solid+'" style="width:'+p.pct+'%"></div></div>'+
+    '<div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">'+
+      '<span><b>'+p.pct+'%</b> <span class="text-neutral-500 dark:text-neutral-400">completado</span></span>'+
+      '<span><b>'+p.current+'</b> <span class="text-neutral-500 dark:text-neutral-400">cursando</span></span>'+
+      '<span><b>'+p.pending+'</b> <span class="text-neutral-500 dark:text-neutral-400">pendientes</span></span>'+
+    '</div></div>');
+  node.appendChild(head);
+  head.querySelector('#pExport').addEventListener('click', function () { openExportModal('pensum'); });
+
+  const grid = el('<div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));"></div>');
+  p.terms.forEach(function (t) {
+    const isCur = curTerm === t.sem;
+    const card = el('<div class="rounded-xl border '+(isCur ? 'border-neutral-300 dark:border-neutral-600' : 'border-neutral-200 dark:border-neutral-800')+' bg-white dark:bg-neutral-900 p-4"></div>');
+    card.appendChild(el('<div class="flex items-baseline justify-between gap-2 mb-2">'+
+      '<span class="text-sm font-medium '+(isCur ? a.text : '')+'">Cuatrimestre '+t.sem+(isCur ? ' · actual' : '')+'</span>'+
+      '<span class="text-xs text-neutral-400 dark:text-neutral-500">'+t.done+'/'+t.courses.length+'</span></div>'));
+    t.courses.forEach(function (c) {
+      const dot = c.state === 'done'
+        ? '<span class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full '+a.solid+' text-white text-[10px] leading-none">✓</span>'
+        : '<span class="inline-block h-3.5 w-3.5 shrink-0 rounded-full border '+(c.state === 'now' ? 'border-neutral-500 dark:border-neutral-300' : 'border-neutral-300 dark:border-neutral-700')+'"></span>';
+      const cls = c.state === 'done' ? 'text-neutral-400 dark:text-neutral-600' : c.state === 'now' ? 'font-medium' : 'text-neutral-600 dark:text-neutral-300';
+      card.appendChild(el('<div class="flex items-start gap-2 py-1">'+dot+
+        '<span class="text-sm leading-snug '+cls+'">'+esc(c.name)+(c.elective ? ' <span class="text-xs text-neutral-400 dark:text-neutral-500">(electiva)</span>' : '')+'</span></div>'));
+    });
+    grid.appendChild(card);
+  });
+  node.appendChild(grid);
+  node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Las aprobadas salen de tu historial académico y de lo que marques en Ajustes. Solo cuentan materias del pensum.</p>'));
+}
+
 const TABS = [
-  ['resumen','Resumen'], ['materias','Materias'], ['todas','Todas'], ['ajustes','Ajustes']
+  ['resumen','Resumen'], ['horario','Horario'], ['materias','Materias'], ['todas','Todas'], ['pensum','Pensum'], ['ajustes','Ajustes']
 ];
 
 function renderTab() {
@@ -2291,8 +2628,10 @@ function renderTab() {
   node.innerHTML = '';
   node.classList.add('fade-in');
   if (state.tab === 'resumen') renderResumen(node);
+  else if (state.tab === 'horario') renderHorario(node);
   else if (state.tab === 'materias') renderMaterias(node);
   else if (state.tab === 'todas') renderTodas(node);
+  else if (state.tab === 'pensum') renderPensum(node);
   else if (state.tab === 'ajustes') renderAjustes(node);
   // refrescar estilos de pestañas activas
   document.querySelectorAll('[data-tab]').forEach(b => {

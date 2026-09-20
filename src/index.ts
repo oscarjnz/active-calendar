@@ -1,5 +1,5 @@
 import type { Env, IcalEvent, Profile } from './types';
-import { collectEnrolledCourses, deriveCourseCode, deriveCourseCodeByProximity, filterInRange, parseIcal } from './ical';
+import { buildWeeklySchedule, collectEnrolledCourses, deriveCourseCode, deriveCourseCodeByProximity, filterInRange, parseIcal } from './ical';
 import { computeDelta } from './diff';
 import {
   adminClient,
@@ -21,6 +21,7 @@ import {
   saveIdentityCheck,
   setIdentityAttempts,
   setProfileCourses,
+  setSchedule,
   setStudentId,
   setTaskCourse,
   setTaskStatus,
@@ -133,6 +134,19 @@ async function syncOne(
   const courses = mergeCourses(profile.courses ?? [], discovered);
   if (discovered.length > 0) {
     await setProfileCourses(sb, profile.user_id, courses);
+  }
+
+  // 1b) Horario semanal: se deduce de las mismas sesiones del feed (una semana tipo).
+  // Solo se escribe si cambió, para no tocar la fila en cada uno de los 48 syncs del día.
+  const schedule = buildWeeklySchedule(all);
+  if (schedule.length > 0 && JSON.stringify(schedule) !== JSON.stringify(profile.schedule ?? [])) {
+    // En try/catch a propósito: si la columna `schedule` todavía no existe (migración sin
+    // correr), el horario se queda vacío pero el sync de tareas tiene que seguir igual.
+    try {
+      await setSchedule(sb, profile.user_id, schedule);
+    } catch (err) {
+      console.error('schedule save failed:', (err as Error).message);
+    }
   }
 
   // 2) Solo las tareas/entregas (no las sesiones) se guardan como tareas. El rango
