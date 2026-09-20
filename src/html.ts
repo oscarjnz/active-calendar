@@ -2575,7 +2575,7 @@ function renderHorario(node) {
   if (!slots.length) {
     node.appendChild(el('<div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-8 text-center">'+
       '<div class="font-medium">Todavía no vemos tus clases</div>'+
-      '<p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">El horario se arma solo con las sesiones de clase de tu calendario de Blackboard. Sincroniza desde Ajustes y vuelve.</p>'+
+      '<p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">El horario se arma solo con las sesiones de clase que tus profesores publiquen en el calendario de Blackboard. Si ninguno las publica, aquí no aparece nada, por más que sincronices.</p>'+
       '</div>'));
     return;
   }
@@ -2620,6 +2620,18 @@ function renderHorario(node) {
     grid.appendChild(col);
   });
   node.appendChild(grid);
+  // Faltan materias a propósito: en Blackboard cada profesor decide si publica o no las
+  // sesiones de clase en el calendario, y la mayoría no lo hace. Sin este aviso el horario
+  // se ve simplemente roto ("llevo nueve materias y aquí sale una").
+  const missing = myCourses().filter(function (c) {
+    return !slots.some(function (s) { return normCode(s.code) === normCode(c.code); });
+  });
+  if (missing.length) {
+    node.appendChild(el('<div class="mt-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">'+
+      '<div class="text-sm font-medium">Faltan '+missing.length+' de tus materias</div>'+
+      '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Solo aparecen las materias cuyo profesor publica las sesiones de clase en el calendario de Blackboard. Estas no las publican, así que no hay forma de saber su horario desde aquí: '+
+      esc(missing.map(function (c) { return c.name; }).join(', '))+'.</p></div>'));
+  }
   node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Sale de las sesiones de tu calendario de Blackboard, así que no incluye profesor ni aula. Si cambias de sección, se actualiza en la próxima sincronización.</p>'));
 }
 
