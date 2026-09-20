@@ -112,7 +112,27 @@ al nivel 4; el resto de esa materia se autoasigna solo en el siguiente sync.
 
 ## Horario semanal (tab Horario)
 
-Sale del **iCal**, no de la fuente académica: las sesiones de clase traen `DTSTART`/`DTEND`
+Tiene **dos fuentes** y manda la académica. Cada `ClassSlot` recuerda de dónde salió
+(`src: 'academic' | 'ical'`), y eso no es decorativo: la fuente académica se consulta con
+throttle de 12 h y el iCal en cada sync, así que sin esa marca un tick normal borraría los
+bloques buenos y los sustituiría por los del feed. La fusión vive en `syncOne` (`index.ts`):
+los bloques académicos ya guardados se conservan mientras no haya consulta nueva, y del iCal
+solo se usan las materias que la fuente académica no reporte.
+
+- **Fuente académica** (`fetchEnrolledSchedule` en `academic.ts`): trae el horario completo
+  del período, con **profesor**, **sección** y **aula** (cuando la universidad la publica).
+  Sale de la misma fila de la que ya se leían las materias, así que no cuesta una petición
+  extra. Cada día llega como una celda de texto que mezcla hora, profesor y aula;
+  `parseScheduleCell()` la desarma de forma tolerante (varios formatos de hora, uno o dos
+  bloques por día, celda vacía = sin clase) y está exportada para poder probarla sola.
+  **OJO:** el marcador am/pm exige la `m`; con la `m` opcional, un `"11:30\rPEREZ…"` se comía
+  la P del apellido como si fuera "pm" y convertía las 11:30 en las 23:30.
+- **iCal**, de respaldo: solo cubre las materias cuyo profesor publique las sesiones de clase
+  en el calendario de Blackboard, que en la práctica son pocas (en el feed real del usuario,
+  una de nueve). Por eso el tab avisa cuántas materias faltan y por qué: sin ese aviso se
+  lee como un bug de la app. No trae profesor ni aula.
+
+Detalle del respaldo por iCal: las sesiones de clase traen `DTSTART`/`DTEND`
 y el código de materia, así que `buildWeeklySchedule` (en `ical.ts`) deduplica las semanas
 repetidas del cuatrimestre y deja una "semana tipo" `[{code,name,day,start,end}]` en hora de
 Santo Domingo (`day`: 0=Lun..6=Dom). `syncOne` la guarda en `profiles.schedule` con
@@ -120,9 +140,7 @@ Santo Domingo (`day`: 0=Lun..6=Dom). `syncOne` la guarda en `profiles.schedule` 
 `/api/profile`), y solo cuando cambió. El horario también alimenta el tab Resumen:
 `nextClassCard()` (tarjeta de próxima clase o clase en curso, también en modo vacaciones) y
 `classOnDueDay(t)`, que marca en cada tarea pendiente si ese día hay clase de esa misma
-materia. Por venir del iCal **no hay profesor ni aula**; si
-algún día se quieren, tendrían que salir del horario de la fuente académica, que hoy
-descarta esos campos.
+materia.
 
 ## Fuente académica y matrícula (`academic.ts`)
 
@@ -146,9 +164,12 @@ toca. No agregar aquí, en comentarios ni en commits ningún detalle de esa fuen
 - `syncOne` consulta con throttle de 12 h (`academic_synced_at`) y fusiona con
   `mergeCourses` (aditivo; el iCal sigue de respaldo si la fuente falla).
 - Siempre se usa la matrícula guardada en el perfil, jamás una que llegue del navegador.
-- Solo se lee horario (código y nombre de materia). No se leen ni guardan notas ni datos
-  personales. Del horario se descartan hoy los días, horas y profesor: si se agrega una vista
-  de horario, es lo primero que hay que empezar a guardar.
+- Del horario se leen código, nombre, sección, día, hora, profesor y aula (ver "Horario
+  semanal"). No se leen ni guardan notas, cédula, fecha de nacimiento ni ningún otro dato
+  personal: del historial solo salen los códigos aprobados, y el nombre oficial se compara en
+  el servidor y nunca se devuelve al navegador.
+- Los campos de día y de sección en el secret son **opcionales**: si faltan, el horario se
+  queda solo con lo que dé el iCal y nada más se rompe.
 - Las peticiones a la fuente **deben llevar `User-Agent`**: el `fetch` de un Worker sale sin
   ninguno y el proveedor responde 403. Si vuelve a fallar, `call()` loguea el código HTTP y la
   cabecera `cf-mitigated` (con `challenge` sería un WAF de verdad, sin eso es la aplicación).
