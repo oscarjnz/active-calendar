@@ -84,7 +84,11 @@ async function call(env: Env, cfg: SourceConfig, ep: Endpoint, studentId: string
       url.searchParams.set(k, v.replace('{id}', studentId).replace('{period}', period));
     }
     const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-    if (!res.ok) throw new Error('bad status');
+    if (!res.ok) {
+      // El código HTTP distingue un bloqueo del proveedor (403) de una ruta mal puesta (404).
+      console.error('academic fetch failed: status', res.status);
+      return null;
+    }
     return await res.json();
   } catch (err) {
     // Solo el tipo de error: el mensaje podría arrastrar la URL.
