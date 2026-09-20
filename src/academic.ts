@@ -34,6 +34,12 @@ const TIMEOUT_MS = 8000;
 // Con cuánta frecuencia se vuelve a consultar por estudiante. El cron corre cada 30 min,
 // pero esta fuente cambia solo al inscribir/retirar materias o al cerrar notas.
 export const ACADEMIC_REFRESH_MS = 12 * 60 * 60 * 1000;
+// Espera mucho más corta mientras el estudiante TODAVÍA no tenga horario de esta fuente
+// (cuenta nueva, o un despliegue que acaba de estrenar los campos de día en el secret). Con
+// el throttle normal habría que esperar hasta medio día para ver el horario por primera vez.
+// Sigue habiendo piso: si la fuente está caída, se reintenta una vez por hora, no en los 48
+// ticks del cron.
+export const ACADEMIC_BOOTSTRAP_MS = 60 * 60 * 1000;
 
 function loadConfig(env: Env): SourceConfig | null {
   if (!env.ACADEMIC_SOURCE) return null;

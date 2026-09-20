@@ -32,6 +32,7 @@ import {
 import { getAuthUserId } from './clerk';
 import { normalizeCode } from './pensum';
 import {
+  ACADEMIC_BOOTSTRAP_MS,
   ACADEMIC_REFRESH_MS,
   academicEnabled,
   emailMatchesName,
@@ -120,7 +121,10 @@ async function syncOne(
   let academicSlots: ClassSlot[] | null = null;
   if (profile.student_id && academicEnabled(env)) {
     const last = profile.academic_synced_at ? Date.parse(profile.academic_synced_at) : 0;
-    if (Date.now() - last >= ACADEMIC_REFRESH_MS) {
+    // Mientras no haya ni un bloque de esta fuente, se reintenta cada hora en vez de cada 12.
+    const hasAcademicSlots = (profile.schedule ?? []).some((s) => s.src === 'academic');
+    const wait = hasAcademicSlots ? ACADEMIC_REFRESH_MS : ACADEMIC_BOOTSTRAP_MS;
+    if (Date.now() - last >= wait) {
       const official = await fetchEnrolledSchedule(env, profile.student_id);
       if (official.courses.length > 0) {
         discovered.push(...official.courses);
