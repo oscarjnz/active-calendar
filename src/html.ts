@@ -270,6 +270,59 @@ function el(html) {
   t.innerHTML = html.trim();
   return t.content.firstElementChild;
 }
+// ---------- teclado ----------
+// Enter dentro de un campo dispara el botón principal de ese formulario. Sin esto hay que
+// tabular hasta el botón en cada paso, que sin mouse es insufrible. El parámetro root acota
+// la búsqueda (los ids se repiten entre pantallas, p. ej. #ical y #save).
+// OJO: este archivo vive dentro de un template literal, así que nada de backticks aquí.
+function submitOnEnter(ids, buttonId, root) {
+  const scope = root || document;
+  for (const id of ids) {
+    const input = scope.querySelector('#' + id);
+    if (!input) continue;
+    input.addEventListener('keydown', (e) => {
+      // isComposing: no robarle el Enter a quien escribe con teclado de acentos/IME.
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      const btn = scope.querySelector('#' + buttonId);
+      if (btn && !btn.disabled) btn.click();
+    });
+  }
+}
+
+/** Primer elemento enfocable de un nodo (para llevar el foco al abrir algo). */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function focusables(node) {
+  return [...node.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null || n === document.activeElement);
+}
+
+/**
+ * Deja el foco dentro del panel mientras esté abierto: lo mueve al primer control, Tab
+ * circula sin escaparse al fondo y al cerrar vuelve a donde estaba. Devuelve el limpiador.
+ */
+function trapFocus(panel, initial) {
+  const prev = document.activeElement;
+  const onKey = (e) => {
+    if (e.key !== 'Tab') return;
+    const items = focusables(panel);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  panel.addEventListener('keydown', onKey);
+  setTimeout(() => {
+    // Si el contenido ya movió el foco a su campo (p. ej. la tarjeta de matrícula), respetarlo.
+    if (!initial && panel.contains(document.activeElement)) return;
+    (initial || focusables(panel)[0] || panel).focus();
+  }, 0);
+  return () => {
+    panel.removeEventListener('keydown', onKey);
+    if (prev && document.contains(prev)) prev.focus();
+  };
+}
+
 // Marca minimalista (calendario + check). Usa currentColor para adaptarse al tema.
 function logoMark(cls) {
   return '<svg viewBox="0 0 32 32" class="'+(cls||'h-7 w-7')+'" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+
@@ -299,7 +352,7 @@ function openModal(title, bodyHtml) {
   if (prev) prev.remove();
   const overlay = el('<div class="app-modal fixed inset-0 z-[60] flex items-center justify-center p-4"></div>');
   const backdrop = el('<div class="absolute inset-0 bg-black/40 opacity-0 transition-opacity duration-200"></div>');
-  const panel = el('<div role="dialog" aria-modal="true" class="relative w-full max-w-lg max-h-[85vh] flex flex-col bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl opacity-0 scale-95 transition duration-200 [transition-timing-function:var(--ease-out)]"></div>');
+  const panel = el('<div role="dialog" aria-modal="true" tabindex="-1" class="relative w-full max-w-lg max-h-[85vh] flex flex-col bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl opacity-0 scale-95 transition duration-200 [transition-timing-function:var(--ease-out)]"></div>');
   panel.appendChild(el('<div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-neutral-200 dark:border-neutral-800"><h3 class="font-semibold">'+esc(title)+'</h3><button class="modal-x pressable h-8 w-8 -mr-1 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800" aria-label="Cerrar">✕</button></div>'));
   const body = el('<div class="overflow-y-auto px-5 py-4 space-y-2"></div>');
   body.innerHTML = bodyHtml;
@@ -311,10 +364,13 @@ function openModal(title, bodyHtml) {
     backdrop.classList.remove('opacity-0');
     panel.classList.remove('opacity-0', 'scale-95');
   });
+  // El foco entra al panel y no se escapa mientras esté abierto; al cerrar vuelve solo.
+  const releaseFocus = trapFocus(panel);
   function close() {
     backdrop.classList.add('opacity-0');
     panel.classList.add('opacity-0', 'scale-95');
     document.removeEventListener('keydown', onKey);
+    releaseFocus();
     setTimeout(() => overlay.remove(), 200);
   }
   function onKey(e) { if (e.key === 'Escape') close(); }
@@ -841,8 +897,13 @@ function wireIdentity(a, onVerified, onUnavailable) {
         </div>
       </div>\`;
     document.body.appendChild(box);
-    $('cfBack').addEventListener('click', () => box.remove());
-    $('cfOk').addEventListener('click', () => { box.remove(); sendCode(btn, 'Enviando…'); });
+    const dialog = box.querySelector('[role="dialog"]');
+    const release = () => { releaseCf(); box.remove(); };
+    // Foco en "Sí, es correcta": Enter confirma, Escape vuelve a revisar, Tab no se sale.
+    const releaseCf = trapFocus(dialog, $('cfOk'));
+    dialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); release(); } });
+    $('cfBack').addEventListener('click', release);
+    $('cfOk').addEventListener('click', () => { release(); sendCode(btn, 'Enviando…'); });
   });
 
   $('sResend').addEventListener('click', (e) => sendCode(e.currentTarget, 'Enviando…'));
@@ -858,7 +919,9 @@ function wireIdentity(a, onVerified, onUnavailable) {
     } catch (err) { msg.textContent = err.message; }
     btn.disabled = false; btn.textContent = 'Verificar';
   });
-  $('scode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sVerify').click(); });
+  // Enter avanza en los dos pasos, igual que si se pulsara el botón.
+  submitOnEnter(['sname', 'sid', 'smail'], 'sNext');
+  submitOnEnter(['scode'], 'sVerify');
   $('sname').focus();
 }
 
@@ -933,6 +996,8 @@ function renderOnboarding() {
   \`);
   root.appendChild(wrap);
   mountUserButton(document.getElementById('topbar'));
+  submitOnEnter(['ical'], 'save', wrap);
+  document.getElementById('ical').focus();
 
   document.getElementById('save').addEventListener('click', async () => {
     const msg = document.getElementById('msg');
@@ -1395,10 +1460,12 @@ function courseMenu(t, optList, cur, a) {
 
   let panel = null;
   let onDocClick = null;
-  function close() {
+  function close(refocus) {
     if (panel) { panel.remove(); panel = null; }
     if (onDocClick) { document.removeEventListener('mousedown', onDocClick); onDocClick = null; }
     btn.setAttribute('aria-expanded', 'false');
+    // Al cerrar con teclado el foco vuelve al botón; si no, se perdería al <body>.
+    if (refocus) btn.focus();
   }
   function selectCourse(code) {
     close();
@@ -1426,9 +1493,21 @@ function courseMenu(t, optList, cur, a) {
     wrap.appendChild(panel);
     onDocClick = (e) => { if (!wrap.contains(e.target)) close(); };
     setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
+    // Las opciones ya son <button>, así que Enter y Espacio funcionan solos; falta llevar
+    // el foco a la lista y moverlo con las flechas, como cualquier desplegable nativo.
+    const opts = [...panel.querySelectorAll('[role="option"]')];
+    const firstOpt = panel.querySelector('[role="option"].font-semibold') || opts[0];
+    if (firstOpt) firstOpt.focus();
+    panel.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      const i = opts.indexOf(document.activeElement);
+      const next = e.key === 'ArrowDown' ? i + 1 : i - 1;
+      opts[(next + opts.length) % opts.length].focus();
+    });
   }
-  btn.addEventListener('click', (e) => { e.stopPropagation(); if (panel) close(); else open(); });
-  wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  btn.addEventListener('click', (e) => { e.stopPropagation(); if (panel) close(true); else open(); });
+  wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });
   return wrap;
 }
 
@@ -1974,6 +2053,8 @@ function renderAjustes(node) {
   \`);
   node.appendChild(card);
   card.querySelector('#privacyLink').addEventListener('click', openPrivacy);
+  // Enter en nombre o enlace guarda, sin bajar hasta el botón al final de Ajustes.
+  submitOnEnter(['dn', 'ical'], 'save', card);
 
   // Selector de cuatrimestre + materias. Se filtran del picker las que el
   // perfil ya marca como aprobadas (completed_courses), igual que en el wizard.
