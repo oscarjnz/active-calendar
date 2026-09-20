@@ -1,4 +1,4 @@
-import type { Env, IcalEvent, Profile } from './types';
+import type { ClassSlot, Env, IcalEvent, Profile } from './types';
 import { buildWeeklySchedule, collectEnrolledCourses, deriveCourseCode, deriveCourseCodeByProximity, filterInRange, parseIcal } from './ical';
 import { computeDelta } from './diff';
 import {
@@ -30,12 +30,13 @@ import {
   upsertEvents,
 } from './supabase';
 import { getAuthUserId } from './clerk';
+import { normalizeCode } from './pensum';
 import {
   ACADEMIC_REFRESH_MS,
   academicEnabled,
   emailMatchesName,
   fetchApprovedCodes,
-  fetchEnrolledCourses,
+  fetchEnrolledSchedule,
   hashVerifyCode,
   lookupOfficialName,
   namesMatch,
@@ -113,13 +114,17 @@ async function syncOne(
   const discovered = collectEnrolledCourses(all);
   // También desde la fuente académica oficial (más completa que las sesiones del feed:
   // incluye materias que aún no tienen sesiones). Con throttle: no se consulta en cada
-  // tick del cron. Si falla o no está configurada, se sigue solo con el feed.
+  // tick del cron. Si falla o no está configurada, se sigue solo con el feed. De la misma
+  // consulta salen los bloques de clase con profesor y sección; `null` significa "no se
+  // consultó (throttle) o falló", que no es lo mismo que "no tiene clases".
+  let academicSlots: ClassSlot[] | null = null;
   if (profile.student_id && academicEnabled(env)) {
     const last = profile.academic_synced_at ? Date.parse(profile.academic_synced_at) : 0;
     if (Date.now() - last >= ACADEMIC_REFRESH_MS) {
-      const official = await fetchEnrolledCourses(env, profile.student_id);
-      if (official.length > 0) {
-        discovered.push(...official);
+      const official = await fetchEnrolledSchedule(env, profile.student_id);
+      if (official.courses.length > 0) {
+        discovered.push(...official.courses);
+        academicSlots = official.slots;
         await markAcademicSynced(sb, profile.user_id);
       }
       // Materias aprobadas: se suman (nunca se quitan) a las que el estudiante ya marcó.
@@ -136,9 +141,19 @@ async function syncOne(
     await setProfileCourses(sb, profile.user_id, courses);
   }
 
-  // 1b) Horario semanal: se deduce de las mismas sesiones del feed (una semana tipo).
+  // 1b) Horario semanal. Dos fuentes: la académica (trae profesor y sección, y cubre las
+  // materias cuyo profesor no publica sesiones en Blackboard) y el iCal, que queda de
+  // respaldo solo para las materias que la académica no reporte. Como la académica se
+  // consulta cada 12 h y el iCal en cada sync, los bloques académicos ya guardados se
+  // conservan mientras no haya una consulta nueva.
   // Solo se escribe si cambió, para no tocar la fila en cada uno de los 48 syncs del día.
-  const schedule = buildWeeklySchedule(all);
+  const prevAcademic = (profile.schedule ?? []).filter((s) => s.src === 'academic');
+  const fromAcademic = academicSlots ?? prevAcademic;
+  const academicCodes = new Set(fromAcademic.map((s) => normalizeCode(s.code)));
+  const schedule = [
+    ...fromAcademic,
+    ...buildWeeklySchedule(all).filter((s) => !academicCodes.has(normalizeCode(s.code))),
+  ].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
   if (schedule.length > 0 && JSON.stringify(schedule) !== JSON.stringify(profile.schedule ?? [])) {
     // En try/catch a propósito: si la columna `schedule` todavía no existe (migración sin
     // correr), el horario se queda vacío pero el sync de tareas tiene que seguir igual.

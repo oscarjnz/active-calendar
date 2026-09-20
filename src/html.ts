@@ -566,8 +566,10 @@ function expHorarioBlocks() {
     const rows = d.slots.map(function (sl) {
       return '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
         '<span style="font-size:12px;font-weight:700;color:#404040;white-space:nowrap;font-variant-numeric:tabular-nums;">'+esc(sl.start + ' – ' + sl.end)+'</span>'+
-        '<span style="flex:1 1 auto;min-width:0;font-size:13px;color:#171717;">'+esc(sl.name)+'</span>'+
-        '<span style="font-size:11px;color:#a3a3a3;white-space:nowrap;">'+esc(sl.code)+'</span></div>';
+        '<span style="flex:1 1 auto;min-width:0;font-size:13px;color:#171717;">'+esc(sl.name)+
+          (sl.teacher ? '<span style="display:block;font-size:11px;color:#737373;">'+esc(sl.teacher)+'</span>' : '')+
+        '</span>'+
+        '<span style="font-size:11px;color:#a3a3a3;white-space:nowrap;">'+esc(slotMeta(sl))+'</span></div>';
     }).join('');
     blocks.push('<div style="margin:0 0 16px;">'+expSectionHead(d.label, d.slots.length + (d.slots.length === 1 ? ' clase' : ' clases'))+rows+'</div>');
   });
@@ -582,7 +584,10 @@ function expHorarioText() {
       if (!d.slots.length) return;
       L.push(d.label);
       L.push('-'.repeat(d.label.length));
-      d.slots.forEach(function (sl) { L.push(sl.start + ' - ' + sl.end + '  ' + sl.name + ' (' + sl.code + ')'); });
+      d.slots.forEach(function (sl) {
+        L.push(sl.start + ' - ' + sl.end + '  ' + sl.name + ' (' + slotMeta(sl) + ')' +
+          (sl.teacher ? '  ' + sl.teacher : ''));
+      });
       L.push('');
     });
   }
@@ -1593,6 +1598,12 @@ function scheduleByDay() {
   });
 }
 function scheduleCourseCount() { return new Set(schedule().map(function (s) { return s.code; })).size; }
+// Línea de "metadata" de un bloque: código, sección y aula, con lo que haya. Del iCal solo
+// viene el código; de la fuente académica pueden venir los tres.
+function slotMeta(s) {
+  return [s.code, s.section ? 'Sec. ' + s.section : '', s.room ? 'Aula ' + s.room : '']
+    .filter(Boolean).join(' · ');
+}
 function scheduleHours() {
   const m = schedule().reduce(function (a, s) { return a + Math.max(0, hhmmToMin(s.end) - hhmmToMin(s.start)); }, 0);
   return Math.round(m / 60);
@@ -2614,7 +2625,8 @@ function renderHorario(node) {
       const card = el('<div class="rounded-lg border px-2.5 py-2 '+(live ? a.chipBg + ' border-transparent' : 'border-neutral-200 dark:border-neutral-800')+'">'+
         '<div class="text-xs font-semibold tabular-nums '+(live ? a.chipText : 'text-neutral-500 dark:text-neutral-400')+'">'+esc(s.start)+' – '+esc(s.end)+'</div>'+
         '<div class="text-sm mt-0.5 break-words">'+esc(s.name)+'</div>'+
-        '<div class="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">'+esc(s.code)+'</div></div>');
+        (s.teacher ? '<div class="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 break-words">'+esc(s.teacher)+'</div>' : '')+
+        '<div class="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">'+esc(slotMeta(s))+'</div></div>');
       col.appendChild(card);
     });
     grid.appendChild(col);
@@ -2632,7 +2644,13 @@ function renderHorario(node) {
       '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Solo aparecen las materias cuyo profesor publica las sesiones de clase en el calendario de Blackboard. Estas no las publican, así que no hay forma de saber su horario desde aquí: '+
       esc(missing.map(function (c) { return c.name; }).join(', '))+'.</p></div>'));
   }
-  node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Sale de las sesiones de tu calendario de Blackboard, así que no incluye profesor ni aula. Si cambias de sección, se actualiza en la próxima sincronización.</p>'));
+  // El pie cambia según de dónde salió el horario: el de Blackboard nunca trae profesor.
+  const anyAcademic = slots.some(function (s) { return s.src === 'academic'; });
+  node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">'+
+    (anyAcademic
+      ? 'Sale de tu horario oficial de la universidad, con profesor y, cuando la universidad lo publica, aula. Los bloques sin profesor vienen del calendario de Blackboard, que no lo trae.'
+      : 'Sale de las sesiones de tu calendario de Blackboard, así que no incluye profesor ni aula.')+
+    ' Si cambias de sección, se actualiza en la próxima sincronización.</p>'));
 }
 
 // ---------- render: avance del pensum ----------

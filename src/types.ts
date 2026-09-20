@@ -32,8 +32,9 @@ export interface IcalEvent {
 }
 
 /**
- * Un bloque de clase del horario semanal. Sale de las sesiones del iCal (no de la fuente
- * académica), así que no hay profesor ni aula: solo materia, día y hora.
+ * Un bloque de clase del horario semanal. Puede venir de dos sitios: de las sesiones del
+ * iCal (solo materia, día y hora) o de la fuente académica, que además trae profesor y
+ * sección. Por eso `teacher` y `section` son opcionales: nunca asumir que están.
  */
 export interface ClassSlot {
   code: string; // código normalizado de la materia
@@ -41,6 +42,14 @@ export interface ClassSlot {
   day: number; // 0=Lun .. 6=Dom, en hora de Santo Domingo
   start: string; // "HH:MM" SDQ
   end: string; // "HH:MM" SDQ
+  teacher?: string; // solo de la fuente académica
+  room?: string; // aula; solo de la fuente académica, y no siempre viene completa
+  section?: string; // solo de la fuente académica
+  // De dónde salió. Hace falta al fusionar: la fuente académica se consulta con throttle de
+  // 12 h y el iCal en cada sync, así que sin esta marca un tick sin consulta académica
+  // borraría los bloques buenos y los sustituiría por los del feed. Las filas viejas no la
+  // traen y se tratan como 'ical'.
+  src?: 'academic' | 'ical';
 }
 
 /** Materia matriculada por el estudiante (código + nombre legible). */
@@ -76,7 +85,7 @@ export interface Profile {
   student_id: string | null; // matrícula; se fija una sola vez en el onboarding y no se puede cambiar
   student_email: string | null; // correo institucional verificado al fijar la matrícula
   academic_synced_at: string | null; // ISO de la última consulta a la fuente académica (throttle)
-  schedule: ClassSlot[]; // horario semanal derivado de las sesiones del iCal (ver buildWeeklySchedule)
+  schedule: ClassSlot[]; // horario semanal (fuente académica si la hay, iCal de respaldo)
   created_at: string;
   updated_at: string;
 }

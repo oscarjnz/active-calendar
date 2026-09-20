@@ -1,4 +1,4 @@
-import type { Course, Env } from './types';
+import type { ClassSlot, Course, Env } from './types';
 import { normalizeCode, pensumName } from './pensum';
 
 // Fuente académica externa. OJO: este repo es público, así que aquí NO puede
@@ -10,7 +10,10 @@ import { normalizeCode, pensumName } from './pensum';
 // {
 //   "base": "https://…",
 //   "period": "…",            // opcional: fuerza el período; si falta se calcula
-//   "schedule": { "path", "query", "rows": "a.b", "code": "<campo>", "name": "<campo>" },
+//   "schedule": { "path", "query", "rows": "a.b", "code": "<campo>", "name": "<campo>",
+//                 "days": ["<campo lun>", …, "<campo dom>"],  // opcional, 7 campos en orden
+//                 "section": "<campo>" },                      // opcional
+
 //   "identity": { "path", "query", "name": "a.b.0.c" },   // nombre completo "APELLIDOS, NOMBRES"
 //   "history":  { "path", "query", "rows": "a.b", "code", "grade", "pass": ["…"] }
 // }
@@ -22,7 +25,7 @@ interface Endpoint {
 interface SourceConfig {
   base: string;
   period?: string;
-  schedule?: Endpoint & { rows: string; code: string; name: string };
+  schedule?: Endpoint & { rows: string; code: string; name: string; days?: string[]; section?: string };
   identity?: Endpoint & { name: string };
   history?: Endpoint & { rows: string; code: string; grade: string; pass: string[] };
 }
@@ -132,28 +135,114 @@ function prettyName(raw: string): string {
     .join(' ');
 }
 
+// Un día del horario llega como una sola celda de texto que mezcla, en líneas separadas, el
+// rango de hora, el profesor (con un código numérico delante) y a veces el aula. El formato
+// exacto es de la fuente, así que aquí se lee de la forma más tolerante posible: se buscan
+// rangos de hora en el texto (uno o varios, por si un día tiene dos bloques) y las líneas
+// restantes se reparten entre profesor y aula por su forma, no por su posición. Una celda
+// vacía significa que ese día no hay clase.
+// OJO: el "am/pm" exige la `m`. Con la `m` opcional, un "11:30\rPEREZ…" se comía la P del
+// apellido como si fuera "pm" y convertía las 11:30 en las 23:30.
+const HALF = String.raw`(?:\s*([ap])\.?\s*m\.?)?`;
+const TIME_RANGE =
+  String.raw`(\d{1,2}):(\d{2})` + HALF + String.raw`\s*(?:\/|-|–|—|\ba\b|\bto\b)\s*(\d{1,2}):(\d{2})` + HALF;
+
+function to24(h: string, m: string, ap?: string): string {
+  let hh = parseInt(h, 10);
+  const half = (ap ?? '').toLowerCase();
+  if (half === 'p' && hh < 12) hh += 12;
+  if (half === 'a' && hh === 12) hh = 0;
+  return String(hh).padStart(2, '0') + ':' + m;
+}
+
+/** Bloques de clase de una celda "hora + profesor + aula". Exportada para poder probarla sola. */
+export function parseScheduleCell(
+  raw: unknown,
+): { start: string; end: string; teacher: string | null; room: string | null }[] {
+  const text = typeof raw === 'string' ? raw.replace(/\r/g, '\n').trim() : '';
+  if (!text) return [];
+  const ranges: { start: string; end: string }[] = [];
+  const re = new RegExp(TIME_RANGE, 'gi');
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const start = to24(m[1]!, m[2]!, m[3]);
+    const end = to24(m[4]!, m[5]!, m[6]);
+    if (start < end) ranges.push({ start, end });
+  }
+  if (ranges.length === 0) return [];
+  // Lo que queda al quitar las horas, línea por línea y sin repetir (un día con dos bloques
+  // trae el mismo nombre dos veces).
+  const leftovers = [
+    ...new Set(
+      text
+        .split('\n')
+        .map((line) => line.replace(new RegExp(TIME_RANGE, 'gi'), ' ').replace(/\s+/g, ' ').trim())
+        .filter((line) => line.length >= 2),
+    ),
+  ];
+  const names: string[] = [];
+  let room: string | null = null;
+  for (const line of leftovers) {
+    // "776803 - ALMONTE DE BEATO, AUSTRALIA CAROL": el código de empleado delante sobra.
+    const named = /^\d{3,}\s*-\s*(.+)$/.exec(line);
+    if (named && named[1]!.trim().length >= 3) {
+      names.push(named[1]!.replace(/\s+,/g, ',').trim());
+      continue;
+    }
+    // Aula: token corto tipo "FR1-508" (a veces llega truncada, "FR1-", sin el número).
+    if (!room && /^[A-Za-z]{1,4}\d*-[\w.]*$/.test(line)) {
+      const cleaned = line.replace(/-$/, '').trim();
+      if (cleaned.length >= 2) room = cleaned.toUpperCase();
+      continue;
+    }
+    if (line.length >= 3) names.push(line);
+  }
+  const teacher = names.length > 0 ? prettyName(names.join(' / ')) : null;
+  return ranges.map((r) => ({ ...r, teacher, room }));
+}
+
 /**
- * Materias matriculadas del estudiante en el período vigente. Usa SIEMPRE el
- * identificador guardado en su perfil (nunca uno que llegue del navegador). Devuelve []
- * ante cualquier falla.
+ * Materias matriculadas y horario semanal del período vigente, en una sola consulta (las dos
+ * cosas salen de la misma fila). Usa SIEMPRE el identificador guardado en su perfil (nunca
+ * uno que llegue del navegador). Devuelve listas vacías ante cualquier falla.
+ *
+ * El horario solo sale si el secret trae los campos de día (`days`); si no, se queda en []
+ * y el Worker sigue con el horario derivado del iCal, como antes.
  */
-export async function fetchEnrolledCourses(env: Env, studentId: string): Promise<Course[]> {
+export async function fetchEnrolledSchedule(
+  env: Env,
+  studentId: string,
+): Promise<{ courses: Course[]; slots: ClassSlot[] }> {
+  const empty = { courses: [], slots: [] };
   const cfg = loadConfig(env);
   const ep = cfg?.schedule;
-  if (!cfg || !ep || !validStudentId(studentId)) return [];
+  if (!cfg || !ep || !validStudentId(studentId)) return empty;
   const r = await call(env, cfg, ep, studentId);
   const rows = r.ok ? pick(r.body, ep.rows) : null;
-  if (!Array.isArray(rows)) return [];
+  if (!Array.isArray(rows)) return empty;
   const byCode = new Map<string, Course>();
+  const byKey = new Map<string, ClassSlot>();
   for (const row of rows) {
     const rawCode = pick(row, ep.code);
     if (typeof rawCode !== 'string' || !rawCode.trim()) continue;
     const code = normalizeCode(rawCode);
     const apiName = pick(row, ep.name);
     const name = pensumName(code) ?? (typeof apiName === 'string' ? prettyName(apiName) : '');
-    if (name) byCode.set(code, { code, name });
+    if (!name) continue;
+    byCode.set(code, { code, name });
+    const rawSection = ep.section ? pick(row, ep.section) : null;
+    const section = typeof rawSection === 'string' && rawSection.trim() ? rawSection.trim() : undefined;
+    (ep.days ?? []).forEach((field, day) => {
+      for (const b of parseScheduleCell(pick(row, field))) {
+        const slot: ClassSlot = { code, name, day, start: b.start, end: b.end, src: 'academic' };
+        if (b.teacher) slot.teacher = b.teacher;
+        if (b.room) slot.room = b.room;
+        if (section) slot.section = section;
+        byKey.set(`${code}|${day}|${b.start}|${b.end}`, slot);
+      }
+    });
   }
-  return [...byCode.values()];
+  const slots = [...byKey.values()].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+  return { courses: [...byCode.values()], slots };
 }
 
 /**

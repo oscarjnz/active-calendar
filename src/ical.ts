@@ -145,6 +145,7 @@ export function buildWeeklySchedule(events: IcalEvent[], from: Date = new Date()
       day: wd === 0 ? 6 : wd - 1,
       start: hhmm(ev.start),
       end: hhmm(ev.due),
+      src: 'ical',
     };
     byKey.set(`${slot.code}|${slot.day}|${slot.start}|${slot.end}`, slot);
   }
