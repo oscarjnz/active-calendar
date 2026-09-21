@@ -175,34 +175,36 @@ export function parseScheduleCell(
     if (start < end) ranges.push({ start, end });
   }
   if (ranges.length === 0) return [];
-  // Lo que queda al quitar las horas, línea por línea y sin repetir (un día con dos bloques
-  // trae el mismo nombre dos veces).
-  const leftovers = [
-    ...new Set(
-      text
-        .split('\n')
-        .map((line) => line.replace(new RegExp(TIME_RANGE, 'gi'), ' ').replace(/\s+/g, ' ').trim())
-        .filter((line) => line.length >= 2),
-    ),
-  ];
-  const names: string[] = [];
+  // OJO: la celda repite el MISMO bloque cientos de veces hasta cortarse a 8000 caracteres, y
+  // pega la fecha de fin con la hora del bloque siguiente ("Al : 19/12/2026|07:00 PM/10:00
+  // PM"), por eso también se parte por "|". De cada línea solo interesan dos formas: la del
+  // profesor y la del aula. Todo lo demás (el rango de fechas del cuatrimestre, y los restos
+  // truncados del final) se descarta en vez de terminar pegado al nombre del profesor.
+  let teacher: string | null = null;
   let room: string | null = null;
-  for (const line of leftovers) {
+  for (const raw of text.split(/[\n|]/)) {
+    const line = raw.replace(new RegExp(TIME_RANGE, 'gi'), ' ').replace(/\s+/g, ' ').trim();
+    if (!line || /^(del|al)\s*:/i.test(line)) continue;
     // "776803 - ALMONTE DE BEATO, AUSTRALIA CAROL": el código de empleado delante sobra.
     const named = /^\d{3,}\s*-\s*(.+)$/.exec(line);
-    if (named && named[1]!.trim().length >= 3) {
-      names.push(named[1]!.replace(/\s+,/g, ',').trim());
+    if (!teacher && named && named[1]!.trim().length >= 3) {
+      teacher = prettyName(named[1]!.replace(/\s+,/g, ',').trim());
       continue;
     }
-    // Aula: token corto tipo "FR1-508" (a veces llega truncada, "FR1-", sin el número).
-    if (!room && /^[A-Za-z]{1,4}\d*-[\w.]*$/.test(line)) {
-      const cleaned = line.replace(/-$/, '').trim();
-      if (cleaned.length >= 2) room = cleaned.toUpperCase();
+    // Red de seguridad: si algún día la fuente deja de anteponer el código, una línea con
+    // forma de "APELLIDOS, NOMBRES" (solo letras y una coma) sigue valiendo como profesor.
+    if (!teacher && /^[A-Za-zÀ-ÿ.\s]+,[A-Za-zÀ-ÿ.\s]+$/.test(line) && line.length >= 5) {
+      teacher = prettyName(line.replace(/\s+,/g, ',').trim());
       continue;
     }
-    if (line.length >= 3) names.push(line);
+    if (room) continue;
+    // Aula real ("FR1-508", "FR1-902 [LAB-TIC]"): se guarda solo el código, sin el descriptor.
+    const aula = /^([A-Za-z]{1,4}\d*-\d+)\b/.exec(line);
+    if (aula) room = aula[1]!.toUpperCase();
+    // Materia sin aula física. El texto completo describe la modalidad y es demasiado largo
+    // para la tarjeta, así que se resume en una palabra.
+    else if (/^virtual\b/i.test(line)) room = 'Virtual';
   }
-  const teacher = names.length > 0 ? prettyName(names.join(' / ')) : null;
   return ranges.map((r) => ({ ...r, teacher, room }));
 }
 

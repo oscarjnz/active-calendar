@@ -1601,8 +1601,8 @@ function scheduleCourseCount() { return new Set(schedule().map(function (s) { re
 // Línea de "metadata" de un bloque: código, sección y aula, con lo que haya. Del iCal solo
 // viene el código; de la fuente académica pueden venir los tres.
 function slotMeta(s) {
-  return [s.code, s.section ? 'Sec. ' + s.section : '', s.room ? 'Aula ' + s.room : '']
-    .filter(Boolean).join(' · ');
+  const lugar = !s.room ? '' : (s.room === 'Virtual' ? 'Virtual' : 'Aula ' + s.room);
+  return [s.code, s.section ? 'Sec. ' + s.section : '', lugar].filter(Boolean).join(' · ');
 }
 function scheduleHours() {
   const m = schedule().reduce(function (a, s) { return a + Math.max(0, hhmmToMin(s.end) - hhmmToMin(s.start)); }, 0);
