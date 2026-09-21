@@ -127,6 +127,14 @@ solo se usan las materias que la fuente académica no reporte.
   bloques por día, celda vacía = sin clase) y está exportada para poder probarla sola.
   **OJO:** el marcador am/pm exige la `m`; con la `m` opcional, un `"11:30\rPEREZ…"` se comía
   la P del apellido como si fuera "pm" y convertía las 11:30 en las 23:30.
+  `cleanSlot()` (exportada en `academic.ts`) vuelve a filtrar cada bloque **ya guardado** en
+  `syncOne`: quita el rango de fechas del cuatrimestre ("DEL : … AL : …"), el código de
+  empleado delante del profesor y el descriptor del aula. Sin eso, un horario escrito por un
+  parser viejo se quedaría sucio hasta la próxima consulta a la fuente (12 h). El navegador
+  repite el mismo saneo al leer `profiles.schedule` (`cleanSlot`/`cleanTeacher`/`cleanRoom` en
+  `html.ts`), así que la tarjeta se ve limpia aunque la fila todavía no se haya reescrito.
+  La tarjeta del día muestra una línea por dato (Código · Sec., Prof., Aula) en vez de todo
+  junto, y el profesor se acorta a "Nombre Apellido" (`teacherShort`, completo en el `title`).
 - **iCal**, de respaldo: solo cubre las materias cuyo profesor publique las sesiones de clase
   en el calendario de Blackboard, que en la práctica son pocas (en el feed real del usuario,
   una de nueve). Por eso el tab avisa cuántas materias faltan y por qué: sin ese aviso se

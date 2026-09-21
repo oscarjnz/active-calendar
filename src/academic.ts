@@ -209,6 +209,44 @@ export function parseScheduleCell(
 }
 
 /**
+ * Deja un bloque ya guardado con solo lo que de verdad es profesor y aula. Los horarios que
+ * se guardaron antes de que `parseScheduleCell` clasificara cada línea traen el rango de
+ * fechas del cuatrimestre metido en el profesor y la modalidad entera como aula; sin esto se
+ * quedarían así hasta la próxima consulta a la fuente (throttle de 12 h).
+ */
+export function cleanSlot(s: ClassSlot): ClassSlot {
+  // Del profesor se recupera lo que sí es nombre: sin el código de empleado de delante y
+  // sin el rango de fechas que la fuente le pega detrás.
+  let teacher = (s.teacher ?? '').replace(/\s+/g, ' ').split(/\b(?:del|al)\s*:/i)[0]!.trim();
+  const named = /^\d{3,}\s*-\s*(.+)$/.exec(teacher);
+  if (named) teacher = named[1]!.trim();
+  const room = (s.room ?? '').replace(/\s+/g, ' ').trim();
+  const out: ClassSlot = {
+    code: s.code,
+    name: (s.name ?? '').split(/\b(?:del|al)\s*:/i)[0]!.replace(/\s+/g, ' ').trim(),
+    day: s.day,
+    start: s.start,
+    end: s.end,
+    src: s.src,
+  };
+  // Un profesor es solo letras, espacios y a lo sumo una coma: una cifra o una barra
+  // significa que la línea era una fecha, un código o una modalidad, no un nombre.
+  if (teacher.length >= 3 && teacher.length <= 48 && /^[A-Za-zÀ-ÿ.,'\s-]+$/.test(teacher)) {
+    out.teacher = prettyName(teacher.replace(/\s+,/g, ','));
+  }
+  // La modalidad viene descrita en una frase entera ("VIRTUAL SINCRONICA POR..."), demasiado
+  // larga para la tarjeta: se resume en una palabra, igual que al parsear la celda.
+  if (/^virtual\b/i.test(room)) out.room = 'Virtual';
+  else {
+    // Solo el código del aula: el descriptor de detrás ("FR1-902 [LAB-TIC]") no cabe.
+    const aula = /^([A-Za-z]{1,4}\d*-\d+)\b/.exec(room);
+    if (aula) out.room = aula[1]!.toUpperCase();
+  }
+  if (s.section && s.section.trim().length <= 12) out.section = s.section.trim();
+  return out;
+}
+
+/**
  * Materias matriculadas y horario semanal del período vigente, en una sola consulta (las dos
  * cosas salen de la misma fila). Usa SIEMPRE el identificador guardado en su perfil (nunca
  * uno que llegue del navegador). Devuelve listas vacías ante cualquier falla.

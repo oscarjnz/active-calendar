@@ -35,6 +35,7 @@ import {
   ACADEMIC_BOOTSTRAP_MS,
   ACADEMIC_REFRESH_MS,
   academicEnabled,
+  cleanSlot,
   emailMatchesName,
   fetchApprovedCodes,
   fetchEnrolledSchedule,
@@ -151,7 +152,9 @@ async function syncOne(
   // consulta cada 12 h y el iCal en cada sync, los bloques académicos ya guardados se
   // conservan mientras no haya una consulta nueva.
   // Solo se escribe si cambió, para no tocar la fila en cada uno de los 48 syncs del día.
-  const prevAcademic = (profile.schedule ?? []).filter((s) => s.src === 'academic');
+  // `cleanSlot` también sobre lo ya guardado: así un horario escrito por el parser viejo (con
+  // el rango de fechas dentro del profesor) se corrige en el primer sync y no en 12 h.
+  const prevAcademic = (profile.schedule ?? []).filter((s) => s.src === 'academic').map(cleanSlot);
   const fromAcademic = academicSlots ?? prevAcademic;
   const academicCodes = new Set(fromAcademic.map((s) => normalizeCode(s.code)));
   const schedule = [

@@ -1576,7 +1576,59 @@ function periodDoneBody() {
 }
 // ---------- horario ----------
 const DAY_NAMES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-function schedule() { return (state.profile && state.profile.schedule) || []; }
+// Etiqueta gris de cada dato en la tarjeta de clase ("Aula", "Prof."): no debe encogerse,
+// porque el que se recorta cuando el texto no cabe es el valor, no la etiqueta.
+const MUTED = 'text-neutral-400 dark:text-neutral-500 shrink-0';
+// OJO: el horario guardado puede traer basura de la fuente académica (el rango de fechas del
+// cuatrimestre pegado al profesor, la modalidad entera como aula) si se guardó con un parser
+// viejo o si la fuente cambia de formato. Por eso se sanea al leerlo: la tarjeta sale limpia
+// sin esperar a que la fuente se vuelva a consultar (throttle de 12 h). Se memoiza por
+// referencia porque schedule() se llama en cada render de cada tarjeta.
+let SCHED_RAW = null, SCHED_CLEAN = [];
+function schedule() {
+  const raw = (state.profile && state.profile.schedule) || [];
+  if (raw !== SCHED_RAW) { SCHED_RAW = raw; SCHED_CLEAN = raw.map(cleanSlot); }
+  return SCHED_CLEAN;
+}
+function cleanSlot(s) {
+  const out = { code: s.code, name: cleanSlotName(s.name), day: s.day, start: s.start, end: s.end, src: s.src };
+  const t = cleanTeacher(s.teacher);
+  if (t) out.teacher = t;
+  const r = cleanRoom(s.room);
+  if (r) out.room = r;
+  const sec = String(s.section || '').trim();
+  if (sec && sec.length <= 12) out.section = sec;
+  return out;
+}
+// El nombre nunca lleva fechas: si aparece un "Del : 07/09/2026", todo lo que sigue sobra.
+function cleanSlotName(raw) {
+  const n = String(raw || '').split(/\\b(?:del|al)\\s*:/i)[0].replace(/\\s+/g, ' ').trim();
+  return n.length > 70 ? n.slice(0, 69).trim() + '…' : n;
+}
+// Un profesor es solo letras, espacios y a lo sumo una coma: cualquier cifra o barra
+// significa que la línea era otra cosa (fecha, código, modalidad) y se descarta entera.
+function cleanTeacher(raw) {
+  const t = String(raw || '').replace(/\\s+/g, ' ').trim();
+  if (t.length < 3 || t.length > 48) return '';
+  return /^[A-Za-zÀ-ÿ.,'\\s-]+$/.test(t) ? t : '';
+}
+function cleanRoom(raw) {
+  const r = String(raw || '').replace(/\\s+/g, ' ').trim();
+  if (/^virtual\\b/i.test(r)) return 'Virtual';
+  const aula = /^([A-Za-z]{1,4}\\d*-\\d+)\\b/.exec(r);
+  return aula ? aula[1].toUpperCase() : '';
+}
+// "Almonte De Beato, Australia Carol" -> "Australia Almonte". El nombre completo cabe mal en
+// una tarjeta de columna y lo importante es reconocer al profesor, no su registro civil; el
+// completo queda en el title para quien lo necesite.
+function teacherShort(raw) {
+  const t = String(raw || '').trim();
+  const i = t.indexOf(',');
+  if (i < 0) return t;
+  const ape = t.slice(0, i).trim().split(/\\s+/)[0] || '';
+  const nom = t.slice(i + 1).trim().split(/\\s+/)[0] || '';
+  return (nom + ' ' + ape).trim() || t;
+}
 function hhmmToMin(t) { const p = String(t || '').split(':'); return (parseInt(p[0],10) || 0) * 60 + (parseInt(p[1],10) || 0); }
 // Lunes a viernes siempre (aunque estén vacíos, para que la rejilla no baile);
 // sábado y domingo solo si de verdad hay clase ese día.
@@ -2622,11 +2674,18 @@ function renderHorario(node) {
       const live = isToday && hhmmToMin(s.start) <= sdqNowMin() && sdqNowMin() < hhmmToMin(s.end);
       // chipBg/chipText y no soft/text: soft no tiene variante oscura en los acentos de
       // color y en modo oscuro quedaría una mancha casi blanca.
+      // Orden de lectura: hora, materia, y debajo los datos sueltos en líneas cortas con su
+      // etiqueta. Antes iban todos pegados en una sola línea y la tarjeta se leía como un
+      // párrafo; con una línea por dato el ojo encuentra el aula sin tener que leer el resto.
+      const bits = [
+        '<div class="flex items-baseline gap-1.5"><span class="'+MUTED+'">Código</span><span class="tabular-nums">'+esc(s.code)+(s.section ? ' · Sec. ' + esc(s.section) : '')+'</span></div>',
+        s.teacher ? '<div class="flex items-baseline gap-1.5"><span class="'+MUTED+'">Prof.</span><span class="truncate min-w-0" title="'+esc(s.teacher)+'">'+esc(teacherShort(s.teacher))+'</span></div>' : '',
+        s.room ? '<div class="flex items-baseline gap-1.5"><span class="'+MUTED+'">'+(s.room === 'Virtual' ? 'Modo' : 'Aula')+'</span><span class="tabular-nums">'+esc(s.room)+'</span></div>' : '',
+      ].filter(Boolean).join('');
       const card = el('<div class="rounded-lg border px-2.5 py-2 '+(live ? a.chipBg + ' border-transparent' : 'border-neutral-200 dark:border-neutral-800')+'">'+
         '<div class="text-xs font-semibold tabular-nums '+(live ? a.chipText : 'text-neutral-500 dark:text-neutral-400')+'">'+esc(s.start)+' – '+esc(s.end)+'</div>'+
-        '<div class="text-sm mt-0.5 break-words">'+esc(s.name)+'</div>'+
-        (s.teacher ? '<div class="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 break-words">'+esc(s.teacher)+'</div>' : '')+
-        '<div class="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">'+esc(slotMeta(s))+'</div></div>');
+        '<div class="text-sm font-medium leading-snug mt-0.5 break-words">'+esc(s.name)+'</div>'+
+        '<div class="text-[11px] text-neutral-600 dark:text-neutral-300 mt-1.5 space-y-0.5">'+bits+'</div></div>');
       col.appendChild(card);
     });
     grid.appendChild(col);
