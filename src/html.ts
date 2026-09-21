@@ -1,5 +1,5 @@
 import type { Env } from './types';
-import { PENSUM, PREREQS } from './pensum';
+import { PENSUM, PREREQS, ELECTIVE_SLOTS } from './pensum';
 import { currentAcademicWeek, currentBlockId } from './time';
 
 /** SPA servida por el Worker. Login con Clerk; datos vía el API del Worker. */
@@ -10,6 +10,7 @@ export function renderApp(env: Env): string {
   });
   // Pensum completo para el selector de materias (código, nombre, cuatrimestre, electiva).
   const pensum = JSON.stringify(PENSUM.map((c) => [c.code, c.name, c.sem, c.elective ? 1 : 0, c.concentration || '']));
+  const slotsJson = JSON.stringify(ELECTIVE_SLOTS);
   // Semana académica (bloque + 1-15) calculada server-side con la fecha actual.
   const week = JSON.stringify(currentAcademicWeek());
   // Prerequisitos por materia (para las advertencias del wizard de cambio de cuatrimestre).
@@ -109,14 +110,14 @@ export function renderApp(env: Env): string {
     appearance: none; -webkit-appearance: none; -moz-appearance: none;
     cursor: pointer;
     background-repeat: no-repeat;
-    background-position: right .65rem center;
-    background-size: .95rem;
-    padding-right: 2.1rem;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
+    background-position: right .9rem center;
+    background-size: 1.15rem;
+    padding-right: 3rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23525252' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
     transition: border-color .16s ease, box-shadow .16s var(--ease-out), background-color .16s ease;
   }
   html.dark select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23d4d4d4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5l5 5 5-5'/%3E%3C/svg%3E");
   }
   select::-ms-expand { display: none; }
   .card { transition: transform .2s var(--ease-out), border-color .2s ease, box-shadow .2s var(--ease-out); }
@@ -165,7 +166,7 @@ export function renderApp(env: Env): string {
 <body class="h-full overflow-x-hidden bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
 <div id="root" class="min-h-full"></div>
 
-<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__WEEK__ = ${week}; window.__PREREQS__ = ${prereqs}; window.__BLOCKID__ = ${blockId};</script>
+<script>window.__CFG__ = ${cfg}; window.__PENSUM__ = ${pensum}; window.__SLOTS__ = ${slotsJson}; window.__WEEK__ = ${week}; window.__PREREQS__ = ${prereqs}; window.__BLOCKID__ = ${blockId};</script>
 <script type="module">
 import { Clerk } from 'https://esm.sh/@clerk/clerk-js@5';
 
@@ -174,7 +175,8 @@ const root = document.getElementById('root');
 
 // ---------- pensum / materias ----------
 const PENSUM = (window.__PENSUM__ || []).map(([code, name, sem, elective, concentration]) => ({ code, name, sem, elective: !!elective, concentration: concentration || '' }));
-const PENSUM_BY_CODE = new Map(PENSUM.map(c => [c.code, c]));
+const SLOTS = (window.__SLOTS__ || []).map(([code, name, sem]) => ({ code, name, sem, elective: true, concentration: '' }));
+const PENSUM_BY_CODE = new Map(PENSUM.concat(SLOTS).map(c => [c.code, c]));
 const WEEK = window.__WEEK__ || null;
 const PREREQS = window.__PREREQS__ || {};
 const BLOCKID = window.__BLOCKID__ || null;
@@ -518,7 +520,7 @@ function expTareasBlocks() {
       const titleStyle = isDone
         ? 'font-size:13px;line-height:1.4;color:#a3a3a3;text-decoration:line-through;'
         : 'font-size:13px;line-height:1.4;color:#171717;';
-      return '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
+      return '<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:5px;background:#fafafa;">'+
         '<span style="margin-top:1px;">'+ind+'</span>'+
         '<div style="flex:1 1 auto;min-width:0;"><div style="'+titleStyle+'">'+esc(t.summary)+'</div></div>'+
         '<div style="font-size:11px;color:#737373;white-space:nowrap;margin-left:10px;">'+esc(fmtDue(t.due))+'</div></div>';
@@ -564,14 +566,14 @@ function expHorarioBlocks() {
   scheduleByDay().forEach(function (d) {
     if (!d.slots.length) return;
     const rows = d.slots.map(function (sl) {
-      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:6px;background:#fafafa;">'+
+      return '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border:1px solid #efefef;border-radius:10px;margin-bottom:5px;background:#fafafa;">'+
         '<span style="font-size:12px;font-weight:700;color:#404040;white-space:nowrap;font-variant-numeric:tabular-nums;">'+esc(sl.start + ' – ' + sl.end)+'</span>'+
         '<span style="flex:1 1 auto;min-width:0;font-size:13px;color:#171717;">'+esc(sl.name)+
-          (sl.teacher ? '<span style="display:block;font-size:11px;color:#737373;">'+esc(sl.teacher)+'</span>' : '')+
+          (sl.teacher ? '<span style="display:block;font-size:11px;color:#737373;">'+esc(teacherShort(sl.teacher))+'</span>' : '')+
         '</span>'+
         '<span style="font-size:11px;color:#a3a3a3;white-space:nowrap;">'+esc(slotMeta(sl))+'</span></div>';
     }).join('');
-    blocks.push('<div style="margin:0 0 16px;">'+expSectionHead(d.label, d.slots.length + (d.slots.length === 1 ? ' clase' : ' clases'))+rows+'</div>');
+    blocks.push('<div style="margin:0 0 12px;">'+expSectionHead(d.label, d.slots.length + (d.slots.length === 1 ? ' clase' : ' clases'))+rows+'</div>');
   });
   return blocks;
 }
@@ -1214,7 +1216,7 @@ function coursePicker(selected, initialTerm, completed) {
     <div class="space-y-4">
       <div>
         <label class="block text-sm font-medium mb-1">¿En qué cuatrimestre vas?</label>
-        <select id="termSel" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2">
+        <select id="termSel" class="w-full sm:w-auto sm:min-w-[20rem] border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2">
           <option value="">Selecciona…</option>
           \${Array.from({length:12}, (_,i)=> '<option value="'+(i+1)+'"'+(initialTerm===i+1?' selected':'')+'>Cuatrimestre '+(i+1)+'</option>').join('')}
         </select>
@@ -1234,7 +1236,7 @@ function coursePicker(selected, initialTerm, completed) {
         </label>
         <div id="offBlockBox" class="space-y-2 pl-6 \${showOffBlock?'':'hidden'}">
           <p class="text-xs text-neutral-500 dark:text-neutral-400">Elige cualquier cuatrimestre para ver y marcar sus materias, sin restricción.</p>
-          <select id="offBlockTerm" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
+          <select id="offBlockTerm" class="w-full sm:w-auto sm:min-w-[20rem] border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
             <option value="">Selecciona un cuatrimestre…</option>
             \${Array.from({length:12}, (_,i)=> '<option value="'+(i+1)+'">Cuatrimestre '+(i+1)+'</option>').join('')}
           </select>
@@ -1257,7 +1259,7 @@ function coursePicker(selected, initialTerm, completed) {
         </label>
         <div id="otherBox" class="space-y-2 pl-6 \${showOther?'':'hidden'}">
           <p class="text-xs text-neutral-500 dark:text-neutral-400">Para adelantar materias: solo se muestran los cuatrimestres posteriores al que elegiste arriba.</p>
-          <select id="otherTerm" class="w-full sm:w-auto border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
+          <select id="otherTerm" class="w-full sm:w-auto sm:min-w-[20rem] border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded-lg px-3 py-2 \${a.ring} focus:outline-none focus:ring-2 mb-2">
             <option value="">Selecciona un cuatrimestre…</option>
           </select>
           <div id="otherChips" class="flex flex-wrap gap-2"></div>
@@ -1625,7 +1627,11 @@ function teacherShort(raw) {
   const t = String(raw || '').trim();
   const i = t.indexOf(',');
   if (i < 0) return t;
-  const ape = t.slice(0, i).trim().split(/\\s+/)[0] || '';
+  // Apellidos con partícula ("De Lima", "De Los Santos"): "De" solo no identifica a nadie.
+  const words = t.slice(0, i).trim().split(/\\s+/);
+  let k = 0;
+  while (k < words.length - 1 && /^(de|del|la|las|los|y|san|santa)$/i.test(words[k])) k++;
+  const ape = words.slice(0, k + 1).join(' ');
   const nom = t.slice(i + 1).trim().split(/\\s+/)[0] || '';
   return (nom + ' ' + ape).trim() || t;
 }
@@ -1703,17 +1709,28 @@ function classOnDueDay(t) {
 // ---------- avance del pensum ----------
 // Cruza el pensum completo con lo aprobado (completed_courses) y lo que cursa ahora
 // (courses). Las materias que el estudiante lleva y no están en el pensum no cuentan.
+// Avance del plan de estudio. Reglas (a propósito, para no inflar lo pendiente):
+//  - Las obligatorias cuentan siempre, cursadas o no.
+//  - Una electiva (o cupo de electiva) solo aparece y cuenta si ya la aprobaste o la estás
+//    cursando; las que no tomaste no se muestran ni son "pendientes".
+//  - "Cursando" es lo que está en tu perfil, pero si ya hay horario oficial solo cuentan las
+//    que salen en él (una materia que agregaste al perfil sin poder inscribirla no es cursada).
 function pensumProgress() {
   const p = state.profile || {};
   const done = new Set((p.completed_courses || []).map(normCode));
-  const now = new Set((p.courses || []).map(function (c) { return normCode(c.code); }));
+  const official = schedule().filter(function (s) { return s.src === 'academic'; });
+  const inSchedule = new Set(official.map(function (s) { return normCode(s.code); }));
+  const now = new Set((p.courses || []).map(function (c) { return normCode(c.code); })
+    .filter(function (c) { return !official.length || inSchedule.has(c); }));
   const terms = new Map();
-  let approved = 0, current = 0;
-  PENSUM.forEach(function (c) {
+  let approved = 0, current = 0, pending = 0;
+  PENSUM.concat(SLOTS).forEach(function (c) {
     const code = normCode(c.code);
     let st = 'todo';
     if (done.has(code)) { st = 'done'; approved++; }
     else if (now.has(code)) { st = 'now'; current++; }
+    else if (c.elective) return;
+    else pending++;
     if (!terms.has(c.sem)) terms.set(c.sem, []);
     terms.get(c.sem).push({ code: code, name: c.name, elective: c.elective, state: st });
   });
@@ -1721,9 +1738,9 @@ function pensumProgress() {
     const courses = terms.get(sem);
     return { sem: sem, courses: courses, done: courses.filter(function (c) { return c.state === 'done'; }).length };
   });
-  const total = PENSUM.length;
+  const total = approved + current + pending;
   return {
-    total: total, approved: approved, current: current, pending: total - approved - current,
+    total: total, approved: approved, current: current, pending: pending,
     pct: total ? Math.round(approved / total * 100) : 0, terms: list,
   };
 }
@@ -1782,9 +1799,26 @@ function courseMenu(t, optList, cur, a) {
   function close(refocus) {
     if (panel) { panel.remove(); panel = null; }
     if (onDocClick) { document.removeEventListener('mousedown', onDocClick); onDocClick = null; }
+    window.removeEventListener('scroll', onMove, true);
+    window.removeEventListener('resize', onMove);
     btn.setAttribute('aria-expanded', 'false');
     // Al cerrar con teclado el foco vuelve al botón; si no, se perdería al <body>.
     if (refocus) btn.focus();
+  }
+  function onMove(e) { if (!panel || (e && e.target && panel.contains(e.target))) return; close(); }
+  // OJO: el panel vive en <body> con position:fixed. Dentro de la tarjeta (absolute) quedaba
+  // detrás de las tarjetas siguientes, porque cada .card crea su propio contexto de apilado
+  // y ningún z-index de adentro puede salir de él.
+  function place() {
+    const r = btn.getBoundingClientRect();
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const h = Math.min(panel.offsetHeight, 256);
+    const below = vh - r.bottom - 8, above = r.top - 8;
+    const up = below < h && above > below;
+    const left = Math.max(8, Math.min(r.left, vw - panel.offsetWidth - 8));
+    panel.style.left = left + 'px';
+    panel.style.top = up ? Math.max(8, r.top - h - 4) + 'px' : (r.bottom + 4) + 'px';
+    panel.style.maxHeight = Math.max(96, Math.min(256, up ? above : below)) + 'px';
   }
   function selectCourse(code) {
     close();
@@ -1801,7 +1835,7 @@ function courseMenu(t, optList, cur, a) {
     const rows = [];
     if (cur) rows.push({ code: '', label: '— Sin materia', clear: true });
     for (const c of optList) rows.push({ code: c.code, label: fmtCourse(c.code, c.name), current: !!(cur && cur.code === normCode(c.code)) });
-    panel = el('<div role="listbox" class="fade-in absolute z-20 mt-1 left-0 min-w-[13rem] max-w-[18rem] max-h-64 overflow-y-auto bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-lg p-1"></div>');
+    panel = el('<div role="listbox" style="position:fixed;top:0;left:0;" class="fade-in z-[55] min-w-[13rem] max-w-[18rem] max-h-64 overflow-y-auto bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-lg p-1"></div>');
     for (const r of rows) {
       const cls = r.current ? 'font-semibold ' + a.text : r.clear ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-700 dark:text-neutral-300';
       const opt = el('<button type="button" role="option" class="pressable w-full text-left text-xs rounded-lg px-2.5 py-1.5 flex items-center gap-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 ' + cls + '"></button>');
@@ -1809,8 +1843,11 @@ function courseMenu(t, optList, cur, a) {
       opt.addEventListener('click', () => { if (r.current) { close(); return; } selectCourse(r.code || null); });
       panel.appendChild(opt);
     }
-    wrap.appendChild(panel);
-    onDocClick = (e) => { if (!wrap.contains(e.target)) close(); };
+    document.body.appendChild(panel);
+    place();
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    onDocClick = (e) => { if (!wrap.contains(e.target) && !panel.contains(e.target)) close(); };
     setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
     // Las opciones ya son <button>, así que Enter y Espacio funcionan solos; falta llevar
     // el foco a la lista y moverlo con las flechas, como cualquier desplegable nativo.
@@ -1818,6 +1855,8 @@ function courseMenu(t, optList, cur, a) {
     const firstOpt = panel.querySelector('[role="option"].font-semibold') || opts[0];
     if (firstOpt) firstOpt.focus();
     panel.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(true); return; }
+      if (e.key === 'Tab') { close(true); return; }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
       e.preventDefault();
       const i = opts.indexOf(document.activeElement);
@@ -2251,6 +2290,35 @@ function renderResumen(node) {
   node.appendChild(layout);
 }
 
+// Buscador compartido por Materias, Todas y Pensum. Cada pestaña recuerda su propia búsqueda.
+// OJO: al escribir solo se repinta el contenedor de resultados (onChange), nunca la pestaña
+// entera, o el input perdería el foco en cada tecla.
+const SEARCH = { materias: '', todas: '', pensum: '' };
+function fold(s) { return String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase(); }
+function matchesQuery(q, parts) {
+  const words = fold(q).split(/\\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = fold(parts.join(' '));
+  return words.every(function (w) { return hay.indexOf(w) !== -1; });
+}
+function searchBox(key, placeholder, onChange) {
+  const a = ac();
+  const box = el('<div class="relative mb-3">'+
+    '<svg viewBox="0 0 20 20" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13.5 13.5L17 17"/></svg>'+
+    '<input type="search" aria-label="'+esc(placeholder)+'" autocomplete="off" placeholder="'+esc(placeholder)+'" class="w-full border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 rounded-xl pl-9 pr-9 py-2 text-sm '+a.ring+' focus:outline-none focus:ring-2" />'+
+    '<button type="button" aria-label="Borrar búsqueda" class="pressable absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hidden">✕</button>'+
+  '</div>');
+  const input = box.querySelector('input');
+  const clear = box.querySelector('button');
+  input.value = SEARCH[key];
+  function sync() { clear.classList.toggle('hidden', !input.value); }
+  input.addEventListener('input', function () { SEARCH[key] = input.value; sync(); onChange(); });
+  input.addEventListener('keydown', function (e) { if (e.key === 'Escape' && input.value) { e.stopPropagation(); clear.click(); } });
+  clear.addEventListener('click', function () { input.value = ''; SEARCH[key] = ''; sync(); onChange(); input.focus(); });
+  sync();
+  return box;
+}
+
 function renderMaterias(node) {
   const a = ac();
   const groups = byCourse();
@@ -2258,24 +2326,38 @@ function renderMaterias(node) {
     node.appendChild(el('<div class="card text-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl px-6 py-12"><p class="text-sm text-neutral-500 dark:text-neutral-400">'+esc(periodDoneBody())+'</p></div>'));
     return;
   }
-  for (const g of groups) {
-    const tasks = g.tasks;
-    const done = tasks.filter(t => t.status === 'done').length;
-    const pct = Math.round(done / tasks.length * 100);
-    const card = el(\`
-      <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mb-3">
-        <div class="flex items-center justify-between mb-1">
-          <h3 class="font-semibold text-sm flex items-center gap-2"><span class="inline-block h-2.5 w-2.5 rounded-full \${a.dot}"></span>\${esc(g.label)}</h3>
-          <span class="text-xs text-neutral-500 dark:text-neutral-400">\${done}/\${tasks.length}</span>
+  node.appendChild(searchBox('materias', 'Buscar por materia o tarea', paint));
+  const results = el('<div></div>');
+  node.appendChild(results);
+  function paint() {
+    results.innerHTML = '';
+    const q = SEARCH.materias;
+    let shown = 0;
+    for (const g of groups) {
+      // Si la búsqueda coincide con la materia se muestra completa; si no, solo sus tareas que coincidan.
+      const wholeGroup = matchesQuery(q, [g.label, g.name, g.code || '']);
+      const tasks = wholeGroup ? g.tasks : g.tasks.filter(t => matchesQuery(q, [t.summary]));
+      if (!tasks.length) continue;
+      shown++;
+      const done = tasks.filter(t => t.status === 'done').length;
+      const pct = Math.round(done / tasks.length * 100);
+      const card = el(\`
+        <div class="card bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 mb-3">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="font-semibold text-sm flex items-center gap-2"><span class="inline-block h-2.5 w-2.5 rounded-full \${a.dot}"></span>\${esc(g.label)}</h3>
+            <span class="text-xs text-neutral-500 dark:text-neutral-400">\${done}/\${tasks.length}</span>
+          </div>
+          <div class="h-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden mb-3"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${pct}%"></div></div>
+          <div class="space-y-2 stagger"></div>
         </div>
-        <div class="h-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden mb-3"><div class="\${a.bar} h-full transition-[width] duration-500 [transition-timing-function:var(--ease-out)]" style="width:\${pct}%"></div></div>
-        <div class="space-y-2 stagger"></div>
-      </div>
-    \`);
-    const list = card.querySelector('div.space-y-2');
-    tasks.forEach(t => list.appendChild(taskRow(t)));
-    node.appendChild(card);
+      \`);
+      const list = card.querySelector('div.space-y-2');
+      tasks.forEach(t => list.appendChild(taskRow(t)));
+      results.appendChild(card);
+    }
+    if (!shown) results.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Nada coincide con "'+esc(q)+'".</p>'));
   }
+  paint();
 }
 
 function renderTodas(node) {
@@ -2286,13 +2368,19 @@ function renderTodas(node) {
   chips.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { state.filter = b.dataset.f; renderTab(); }));
   node.appendChild(chips);
 
-  let list = state.tasks.slice();
-  if (state.filter === 'pending') list = list.filter(t => t.status === 'pending');
-  if (state.filter === 'done') list = list.filter(t => t.status === 'done');
+  node.appendChild(searchBox('todas', 'Buscar por tarea o materia', paint));
   const box = el('<div class="space-y-2 stagger"></div>');
-  if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">No hay tareas que mostrar.</p>'));
-  else list.forEach(t => box.appendChild(taskRow(t)));
   node.appendChild(box);
+  function paint() {
+    box.innerHTML = '';
+    let list = state.tasks.slice();
+    if (state.filter === 'pending') list = list.filter(t => t.status === 'pending');
+    if (state.filter === 'done') list = list.filter(t => t.status === 'done');
+    list = list.filter(t => { const c = taskCourse(t); return matchesQuery(SEARCH.todas, [t.summary, c ? c.name : 'sin materia', c && c.code || '']); });
+    if (list.length === 0) box.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">'+(SEARCH.todas ? 'Nada coincide con "'+esc(SEARCH.todas)+'".' : 'No hay tareas que mostrar.')+'</p>'));
+    else list.forEach(t => box.appendChild(taskRow(t)));
+  }
+  paint();
 }
 
 function renderAjustes(node) {
@@ -2736,25 +2824,36 @@ function renderPensum(node) {
   node.appendChild(head);
   head.querySelector('#pExport').addEventListener('click', function () { openExportModal('pensum'); });
 
-  const grid = el('<div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));"></div>');
-  p.terms.forEach(function (t) {
-    const isCur = curTerm === t.sem;
-    const card = el('<div class="rounded-xl border '+(isCur ? 'border-neutral-300 dark:border-neutral-600' : 'border-neutral-200 dark:border-neutral-800')+' bg-white dark:bg-neutral-900 p-4"></div>');
-    card.appendChild(el('<div class="flex items-baseline justify-between gap-2 mb-2">'+
-      '<span class="text-sm font-medium '+(isCur ? a.text : '')+'">Cuatrimestre '+t.sem+(isCur ? ' · actual' : '')+'</span>'+
-      '<span class="text-xs text-neutral-400 dark:text-neutral-500">'+t.done+'/'+t.courses.length+'</span></div>'));
-    t.courses.forEach(function (c) {
-      const dot = c.state === 'done'
-        ? '<span class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full '+a.solid+' text-white text-[10px] leading-none">✓</span>'
-        : '<span class="inline-block h-3.5 w-3.5 shrink-0 rounded-full border '+(c.state === 'now' ? 'border-neutral-500 dark:border-neutral-300' : 'border-neutral-300 dark:border-neutral-700')+'"></span>';
-      const cls = c.state === 'done' ? 'text-neutral-400 dark:text-neutral-600' : c.state === 'now' ? 'font-medium' : 'text-neutral-600 dark:text-neutral-300';
-      card.appendChild(el('<div class="flex items-start gap-2 py-1">'+dot+
-        '<span class="text-sm leading-snug '+cls+'">'+esc(c.name)+(c.elective ? ' <span class="text-xs text-neutral-400 dark:text-neutral-500">(electiva)</span>' : '')+'</span></div>'));
+  node.appendChild(searchBox('pensum', 'Buscar materia del pensum', paint));
+  const holder = el('<div></div>');
+  node.appendChild(holder);
+  function paint() {
+    holder.innerHTML = '';
+    const q = SEARCH.pensum;
+    const grid = el('<div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));"></div>');
+    p.terms.forEach(function (t) {
+      const courses = t.courses.filter(function (c) { return matchesQuery(q, [c.name, c.code]); });
+      if (!courses.length) return;
+      const isCur = curTerm === t.sem;
+      const card = el('<div class="rounded-xl border '+(isCur ? 'border-neutral-300 dark:border-neutral-600' : 'border-neutral-200 dark:border-neutral-800')+' bg-white dark:bg-neutral-900 p-4"></div>');
+      card.appendChild(el('<div class="flex items-baseline justify-between gap-2 mb-2">'+
+        '<span class="text-sm font-medium '+(isCur ? a.text : '')+'">Cuatrimestre '+t.sem+(isCur ? ' · actual' : '')+'</span>'+
+        '<span class="text-xs text-neutral-400 dark:text-neutral-500">'+t.done+'/'+t.courses.length+'</span></div>'));
+      courses.forEach(function (c) {
+        const dot = c.state === 'done'
+          ? '<span class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full '+a.solid+' text-white text-[10px] leading-none">✓</span>'
+          : '<span class="inline-block h-3.5 w-3.5 shrink-0 rounded-full border '+(c.state === 'now' ? 'border-neutral-500 dark:border-neutral-300' : 'border-neutral-300 dark:border-neutral-700')+'"></span>';
+        const cls = c.state === 'done' ? 'text-neutral-400 dark:text-neutral-600' : c.state === 'now' ? 'font-medium' : 'text-neutral-600 dark:text-neutral-300';
+        card.appendChild(el('<div class="flex items-start gap-2 py-1">'+dot+
+          '<span class="text-sm leading-snug '+cls+'">'+esc(c.name)+(c.elective ? ' <span class="text-xs text-neutral-400 dark:text-neutral-500">(electiva)</span>' : '')+'</span></div>'));
+      });
+      grid.appendChild(card);
     });
-    grid.appendChild(card);
-  });
-  node.appendChild(grid);
-  node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Las aprobadas salen de tu historial académico y de lo que marques en Ajustes. Solo cuentan materias del pensum.</p>'));
+    if (!grid.children.length) holder.appendChild(el('<p class="text-sm text-neutral-500 dark:text-neutral-400">Nada coincide con "'+esc(q)+'".</p>'));
+    else holder.appendChild(grid);
+  }
+  paint();
+  node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Las aprobadas salen de tu historial académico y de lo que marques en Ajustes. Las electivas solo aparecen si ya las cursaste o las estás cursando, y las que no tomaste no cuentan como pendientes. El porcentaje es por número de materias, así que puede diferir un poco del avance por créditos de la universidad.</p>'));
 }
 
 const TABS = [

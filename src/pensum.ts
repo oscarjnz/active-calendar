@@ -73,6 +73,7 @@ const RAW: Array<[string, string, number, boolean?, string?]> = [
   ['TI3320', 'Circuitos Digitales', 7],
   ['TI3321', 'Fundamentos de Ciberseguridad', 7],
   ['TI3322', 'Conmutación y Enrutamiento', 7],
+  ['UNB306', 'Educación Constitucional', 7],
   // Semestre 8
   ['AD8120', 'Taller de Creatividad e Innovación', 8],
   ['AD8130', 'Contabilidad Financiera I', 8],
@@ -147,9 +148,22 @@ const RAW: Array<[string, string, number, boolean?, string?]> = [
   ['IC4525', 'Seminario de Preparación al CAPM-PMI', 9, true, 'Electiva profesional'],
 ];
 
+// Cupos de electiva que el plan de estudio oficial lista con un código genérico (no con el de
+// la materia concreta que se cursó). Solo sirven para reconocer el aprobado en el historial y
+// mostrarlo en el avance; NO son parte de PENSUM porque no se ofrecen en los selectores.
+export const ELECTIVE_SLOTS: Array<[string, string, number]> = [
+  ['TI3700', 'Electiva', 9],
+  ['TI3710', 'Electiva', 9],
+  ['TI3500', 'Electiva profesional', 10],
+  ['TI3510', 'Electiva profesional', 10],
+  ['TI3520', 'Electiva profesional', 11],
+  ['TI3530', 'Electiva profesional', 11],
+];
+
 export const PENSUM: PensumCourse[] = RAW.map(([code, name, sem, elective, concentration]) => ({ code, name, sem, elective: elective ?? false, concentration: concentration ?? '' }));
 
 const BY_CODE = new Map<string, PensumCourse>(PENSUM.map((c) => [c.code, c]));
+for (const [code, name, sem] of ELECTIVE_SLOTS) BY_CODE.set(code, { code, name, sem, elective: true, concentration: '' });
 
 /** Normaliza un código: mayúsculas, sin guiones ni espacios. "TI3-631" -> "TI3631". */
 export function normalizeCode(raw: string): string {
