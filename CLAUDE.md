@@ -230,3 +230,24 @@ carga notable contra el feed de Blackboard de cada usuario, considerar separar d
 sync en dos cadencias (una liviana solo para detectar `created` y otra pesada para
 backfill/descubrimiento de materias), pero por ahora un solo `syncOne` cada 30 min cubre
 todo.
+
+## Pensum, buscador y desplegables (2026-09-21)
+
+- **Avance del pensum** (`pensumProgress` en `html.ts`): las obligatorias cuentan siempre; una
+  electiva o cupo de electiva solo aparece y cuenta si está aprobada o cursando (las no
+  tomadas ni se muestran ni son "pendientes"). "Cursando" sale del perfil, pero si ya hay
+  horario oficial solo cuentan las que están en él (una materia puesta en el perfil sin poder
+  inscribirla no es cursada; el aviso del tab Horario la sigue marcando). Verificado contra el
+  plan real del usuario: 67 aprobadas, 6 cursando, 8 pendientes. El % es por número de
+  materias, no por créditos como el de la universidad.
+- `ELECTIVE_SLOTS` (`pensum.ts`): cupos que el plan oficial lista con código genérico
+  (TI3700, TI3710, TI3500...). No están en `PENSUM` (no salen en selectores) pero `pensumName`
+  los reconoce, así el historial los cuenta como aprobados. También se agregó UNB306.
+- `ACADEMIC_SOURCE.history.pass` ahora es `["A","B","C","S","EXO"]` (S = inglés y talleres sin
+  créditos, EXO = exonerada).
+- **Buscador** compartido (`searchBox`, `matchesQuery`, `SEARCH` en `html.ts`) en Materias,
+  Todas y Pensum: ignora tildes y mayúsculas, solo repinta los resultados (no la pestaña) para
+  no perder el foco.
+- **Desplegable de materia** (`courseMenu`): el panel vive en `<body>` con `position:fixed`.
+  Dentro de la tarjeta quedaba detrás de las siguientes porque cada `.card` crea su contexto
+  de apilado. Cualquier panel flotante nuevo debe hacer lo mismo.
