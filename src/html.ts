@@ -2694,17 +2694,19 @@ function renderHorario(node) {
   // Faltan materias a propósito: en Blackboard cada profesor decide si publica o no las
   // sesiones de clase en el calendario, y la mayoría no lo hace. Sin este aviso el horario
   // se ve simplemente roto ("llevo nueve materias y aquí sale una").
+  const anyAcademic = slots.some(function (s) { return s.src === 'academic'; });
   const missing = myCourses().filter(function (c) {
     return !slots.some(function (s) { return normCode(s.code) === normCode(c.code); });
   });
   if (missing.length) {
     node.appendChild(el('<div class="mt-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">'+
-      '<div class="text-sm font-medium">Faltan '+missing.length+' de tus materias</div>'+
-      '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Solo aparecen las materias cuyo profesor publica las sesiones de clase en el calendario de Blackboard. Estas no las publican, así que no hay forma de saber su horario desde aquí: '+
+      '<div class="text-sm font-medium">'+(missing.length === 1 ? 'Falta 1 de tus materias' : 'Faltan '+missing.length+' de tus materias')+'</div>'+
+      '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">'+(anyAcademic
+        ? 'Estas materias están en tu perfil pero no aparecen en tu horario oficial. Si no las estás cursando, quítalas en Ajustes; si sí, revisa tu inscripción: '
+        : 'Solo aparecen las materias cuyo profesor publica las sesiones de clase en el calendario de Blackboard. Estas no las publican, así que no hay forma de saber su horario desde aquí: ')+
       esc(missing.map(function (c) { return c.name; }).join(', '))+'.</p></div>'));
   }
   // El pie cambia según de dónde salió el horario: el de Blackboard nunca trae profesor.
-  const anyAcademic = slots.some(function (s) { return s.src === 'academic'; });
   node.appendChild(el('<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-3">'+
     (anyAcademic
       ? 'Sale de tu horario oficial de la universidad, con profesor y, cuando la universidad lo publica, aula. Los bloques sin profesor vienen del calendario de Blackboard, que no lo trae.'

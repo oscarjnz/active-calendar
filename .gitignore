@@ -7,3 +7,5 @@ dist/
 .env
 .env.*
 !.dev.vars.example
+pensum-tic-unibe.pdf
+.claude/
